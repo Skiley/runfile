@@ -1,5 +1,7 @@
 # Runfile
 
+[Quick start](#quick-start) · [Why Runfile?](#why-runfile) · [Features](#what-makes-it-different) · [Platforms](#platform-support) · [Docs](.github/DOCS.md)
+
 **One JSON file. One binary. Every OS. Every shell.**
 
 A modern command runner that replaces Makefiles, shell scripts, and `npm run` — without the platform headaches.
@@ -13,12 +15,84 @@ $ run dev --port=4000
   "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
   "targets": {
     "dev": {
-      "description": "Start the dev server",
-      "commands": ["npm run dev"],
+      "description": "Starts the dev server",
+      "commands": "vite",
       "env": { "PORT": "$(ARGS.port ? 3000)" }
+    },
+    "build": {
+      "description": "Type-checks and builds in parallel",
+      "commands": [
+        "@type-check",
+        "vite build",
+        {
+          "if": "$(RUN.os) == windows && $(FLAGS.wsl) == true",
+          "then": "wsl --shell-type login -- vite build"
+        }
+      ],
+      "parallel": true
+    },
+    "type-check": {
+      "description": "Type-checks source code",
+      "commands": "tsc --noEmit"
     }
   }
 }
+```
+
+---
+
+## Quick start
+
+**1. Install:**
+
+```bash
+# npm
+npm install -g @skiley/runfile
+
+# Linux / macOS
+curl -fsSL https://github.com/Skiley/runfile/releases/latest/download/install.sh | sh
+
+# Windows (PowerShell)
+iwr https://github.com/Skiley/runfile/releases/latest/download/install.ps1 | iex
+```
+
+**2. Generate a starter `Runfile.json`** in your project root:
+
+```bash
+$ run :init
+```
+
+This drops a minimal Runfile you can edit:
+
+```jsonc
+{
+  "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+  "targets": {
+    // Single-command targets can use a plain string instead of an array.
+    "build": { "commands": "cargo build --release" },
+    "test":  { "commands": "cargo test $(ARGS)" },
+    "dev":   {
+      "commands": ["npm run dev"],
+      "env": { "PORT": "$(ARGS.port ? 3000)" },
+      "watch": ["src/**/*"]
+    }
+  }
+}
+```
+
+**3. List and run targets:**
+
+```bash
+$ run :list
+$ run build
+$ run test --release
+$ run dev --port=4000
+```
+
+**4. Add tab completion** (optional):
+
+```bash
+$ run :completions install bash    # or zsh, fish, powershell
 ```
 
 ---
@@ -195,49 +269,6 @@ $ run :convert makefile       # turns Makefile recipes into targets
 Parallel & detached execution · file includes with cycle detection · global Runfiles · path aliases · confirmation
 prompts · `--dry-run` · `--timings` · force-kill on SIGINT (works for GUI apps like Unity) · stdio tailers · shell
 completions · MCP server.
-
----
-
-## Quick start
-
-**1. Generate a starter `Runfile.json`** in your project root:
-
-```bash
-$ run :init
-```
-
-This drops a minimal Runfile you can edit:
-
-```jsonc
-{
-  "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
-  "targets": {
-    // Single-command targets can use a plain string instead of an array.
-    "build": { "commands": "cargo build --release" },
-    "test":  { "commands": "cargo test $(ARGS)" },
-    "dev":   {
-      "commands": ["npm run dev"],
-      "env": { "PORT": "$(ARGS.port ? 3000)" },
-      "watch": ["src/**/*"]
-    }
-  }
-}
-```
-
-**2. List and run targets:**
-
-```bash
-$ run :list
-$ run build
-$ run test --release
-$ run dev --port=4000
-```
-
-**3. Add tab completion** (optional):
-
-```bash
-$ run :completions install bash    # or zsh, fish, powershell
-```
 
 ---
 
