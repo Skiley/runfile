@@ -1,0 +1,62 @@
+name: Setup Runfile
+description: Installs Runfile and add it to PATH
+author: Skiley
+
+inputs:
+  version:
+    description: 'Version to install. Defaults to latest.'
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve target
+      id: target
+      shell: bash
+      run: |
+        case "$RUNNER_OS" in
+          Linux)   os=unknown-linux-musl ;;
+          macOS)   os=apple-darwin ;;
+          Windows) os=pc-windows-msvc ;;
+          *)       echo "Unsupported OS: $RUNNER_OS" >&2; exit 1 ;;
+        esac
+
+        case "$RUNNER_ARCH" in
+          X64)   arch=x86_64 ;;
+          ARM64) arch=aarch64 ;;
+          *)     echo "Unsupported arch: $RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+
+        if [ "$RUNNER_OS" = "Windows" ]; then ext=zip; else ext=tar.xz; fi
+
+        echo "target=${arch}-${os}" >> "$GITHUB_OUTPUT"
+        echo "ext=${ext}" >> "$GITHUB_OUTPUT"
+
+    - name: Install runfile
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        TARGET: ${{ steps.target.outputs.target }}
+        EXT: ${{ steps.target.outputs.ext }}
+      run: |
+        archive="runfile-cli-${TARGET}.${EXT}"
+
+        if [ "$VERSION" = "latest" ]; then
+          url="https://github.com/Skiley/runfile/releases/latest/download/${archive}"
+        else
+          url="https://github.com/Skiley/runfile/releases/download/${VERSION}/${archive}"
+        fi
+
+        install_dir="$RUNNER_TEMP/runfile-bin"
+        mkdir -p "$install_dir"
+        curl -fsSL "$url" -o "$RUNNER_TEMP/$archive"
+
+        if [ "$EXT" = "zip" ]; then
+          unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP"
+        else
+          tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+        fi
+
+        mv "$RUNNER_TEMP/runfile-cli-${TARGET}"/run* "$install_dir/"
+        echo "$install_dir" >> "$GITHUB_PATH"
+        "$install_dir"/run* --version
