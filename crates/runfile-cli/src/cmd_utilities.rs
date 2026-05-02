@@ -47,7 +47,7 @@ pub fn cmd_init(path: Option<PathBuf>) {
 	targets.insert("hello".to_string(), hello_spec);
 
 	let runfile = Runfile {
-		schema: "https://runfile.io/schemas/v0".to_string(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".to_string(),
 		includes: None,
 		targets,
 		globals: Some(Globals::default()),

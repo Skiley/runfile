@@ -67,7 +67,7 @@ Create a `Runfile.json` in your project root:
 
 ```json
 {
-	"$schema": "https://runfile.io/schemas/v0",
+	"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 	"targets": {
 		"build": {
 			"description": "Build the project",
@@ -200,7 +200,7 @@ $ run --dry-run deploy
 
 ```json
 {
-	"$schema": "https://runfile.io/schemas/v0",
+	"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 	"includes": ["./shared/ci.runfile.json"],
 	"targets": {
 		...
@@ -216,7 +216,7 @@ $ run --dry-run deploy
 - `targets` (required): Named targets to run.
 - `globals` (optional): Settings applied to all targets.
 
-- `$schema` (string, required) — Schema identifier. Use `"https://runfile.io/schemas/v0"` for now, or a path/URL to the JSON Schema file for editor autocomplete.
+- `$schema` (string, required) — Schema identifier. Use `"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json"` for now, or a path/URL to the JSON Schema file for editor autocomplete.
 - `targets` (object, required) — One or more named targets. At least one target must be defined.
 - `globals` (object, optional) — Settings that apply to all targets.
 
@@ -1188,7 +1188,7 @@ Targets whose **canonical name starts with `_`** are *internal*. They are hidden
 
 ```json
 {
-    "$schema": "https://runfile.io/schemas/v0",
+    "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
     "targets": {
         "_setup": {
             "description": "Shared bootstrap step",
@@ -1352,7 +1352,7 @@ Use `includes` to pull targets from other Runfile.json files:
 
 ```json
 {
-	"$schema": "https://runfile.io/schemas/v0",
+	"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 	"includes": [
 		"./shared/ci.runfile.json",
 		"./tools.runfile.json"

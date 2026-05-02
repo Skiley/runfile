@@ -23,3 +23,7 @@ install-updater = false
 npm-scope = "@skiley"
 npm-package = "runfile"
 publish-jobs = ["npm"]
+
+[[dist.extra-artifacts]]
+artifacts = ["v0.schema.json"]
+build = ["cp", "schemas/v0.schema.json", "v0.schema.json"]

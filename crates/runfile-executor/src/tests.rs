@@ -872,7 +872,7 @@ fn run_target_with_dependency() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "setup": {{ "commands": ["{create_marker}"] }},
             "build": {{ "commands": ["@setup", "echo building"] }}
@@ -897,7 +897,7 @@ fn run_target_cycle_detection() {
 	let dir = TempDir::new().unwrap();
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "a": { "commands": ["@b"] },
             "b": { "commands": ["@a"] }
@@ -934,7 +934,7 @@ fn when_always_runs_after_success() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": [
@@ -966,7 +966,7 @@ fn when_failure_skips_on_success() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": [
@@ -1005,7 +1005,7 @@ fn when_failure_runs_on_failure() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": [
@@ -1050,7 +1050,7 @@ fn when_with_if_block() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": [
@@ -1089,7 +1089,7 @@ fn when_ignore_errors_does_not_flip_target_state() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": [
@@ -1124,7 +1124,7 @@ fn when_inside_parallel_target_partitions_by_phase() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "parallel": true,
@@ -1163,7 +1163,7 @@ fn detach_evaluates_if_block_and_does_not_run_condition_as_shell() {
 	use std::collections::HashMap;
 
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"install": {
 				"commands": [
@@ -1199,7 +1199,7 @@ fn detach_evaluates_if_block_and_does_not_run_condition_as_shell() {
 
 	// And `@target` calls inside detach are rejected.
 	let json2 = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"foo": { "commands": ["echo hi"] },
 			"bad": { "commands": ["@foo"], "detach": true, "forceShell": "sh" }
@@ -1238,7 +1238,7 @@ fn target_call_runs_dependency_and_passes_args() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "echo-arg": {{ "commands": ["{append_arg}"] }},
             "main": {{
@@ -1279,7 +1279,7 @@ fn target_call_no_dedup() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "tick": {{ "commands": ["{bump}"] }},
             "main": {{ "commands": ["@tick", "@tick", "@tick"] }}
@@ -1316,7 +1316,7 @@ fn target_call_passes_parent_env_to_dep() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "show-env": {{ "commands": ["{echo_var}"] }},
             "parent": {{
@@ -1358,7 +1358,7 @@ fn target_call_dep_env_overrides_parent_env() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "show": {{
                 "env": {{ "SHARED": "from-dep" }},
@@ -1392,7 +1392,7 @@ fn target_call_cycle_is_detected() {
 	let dir = TempDir::new().unwrap();
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "a": { "commands": ["@b"] },
             "b": { "commands": ["@a"] }
@@ -1418,7 +1418,7 @@ fn target_call_unknown_target_errors() {
 	let dir = TempDir::new().unwrap();
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "main": { "commands": ["@nonexistent"] }
         }
@@ -1443,7 +1443,7 @@ fn target_call_in_parallel_parent_runs_each_dep() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "log": {{ "commands": ["{bump}"] }},
             "main": {{
@@ -1493,7 +1493,7 @@ fn target_call_inside_if_branch() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "prod": {{ "commands": ["{touch_prod}"] }},
             "dev": {{ "commands": ["{touch_dev}"] }},
@@ -1529,7 +1529,7 @@ fn target_call_substitutes_args_template() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "echo": {{ "commands": ["{echo}"] }},
             "fwd": {{ "commands": ["@echo $(ARGS)"] }}
@@ -1567,7 +1567,7 @@ fn run_target_cwd_working_directory() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "test-cwd": {{
                 "commands": ["{create_marker}"],
@@ -1616,7 +1616,7 @@ fn run_target_global_cwd_working_directory() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "test-cwd": {{
                 "commands": ["{create_marker}"],
@@ -1670,7 +1670,7 @@ fn run_target_working_directory_target_overrides_global() {
 
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "test-override": {{
                 "commands": ["{create_marker}"],
@@ -1720,7 +1720,7 @@ fn working_directory_accepts_substitution() {
 	// `$(ARGS.dir ? cwd)` → resolves to the literal "cwd" at runtime.
 	let json = format!(
 		r#"{{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": ["{touch}"],
@@ -1743,7 +1743,7 @@ fn working_directory_invalid_substitution_errors_at_runtime() {
 	let shell = get_test_shell();
 	let dir = TempDir::new().unwrap();
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "t": {
                 "commands": ["echo hi"],
@@ -1767,7 +1767,7 @@ fn force_shell_accepts_substitution() {
 	let shell = get_test_shell();
 	let dir = TempDir::new().unwrap();
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "t": {
                 "commands": ["echo hi"],
@@ -1788,7 +1788,7 @@ fn extract_simple_target() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build", "echo done"] }
         }
@@ -1816,7 +1816,7 @@ fn extract_with_env_vars_bash() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["npm run build"],
@@ -1850,7 +1850,7 @@ fn extract_with_dependencies() {
 	// up as the args template line (empty here) so we only see the parent's
 	// shell commands.
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "clean": { "commands": ["npm run clean"], "env": { "ENV": "test" } },
             "build": {
@@ -1885,7 +1885,7 @@ fn extract_with_global_dependency() {
 	// Migrated from `before.target` lifecycle hooks to `@target` invocations
 	// in `commands` (lifecycle was removed; deps live inline now).
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "setup": { "commands": ["echo setup"] },
             "build": { "commands": ["@setup", "echo build"] }
@@ -1917,7 +1917,7 @@ fn extract_cycle_at_runtime() {
 	use runfile_parser::parse_runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "a": { "commands": ["@b"] },
             "b": { "commands": ["@a"] }
@@ -1940,7 +1940,7 @@ fn extract_with_args_substitution() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "deploy": { "commands": ["echo deploying to $(ARGS.env)"] }
         }
@@ -1967,7 +1967,7 @@ fn extract_missing_required_arg_errors() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "deploy": { "commands": ["echo deploying to $(ARGS.env)"] }
         }
@@ -2166,7 +2166,7 @@ fn run_target_rejects_unexpected_args() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo hello"] }
         }
@@ -2195,7 +2195,7 @@ fn run_target_rejects_unknown_named_arg() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "deploy": { "commands": ["echo deploying to $(ARGS.env)"] }
         }
@@ -2225,7 +2225,7 @@ fn run_target_accepts_valid_args() {
 
 	let shell = detect_default_shell().unwrap();
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "greet": { "commands": ["echo hello $(ARGS)"] }
         }
@@ -2247,7 +2247,7 @@ fn extract_rejects_unexpected_args() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo hello"] }
         }
@@ -2282,7 +2282,7 @@ fn run_target_dependency_args_accepted() {
 	let shell = detect_default_shell().unwrap();
 	// `@setup $(ARGS)` forwards the parent's args explicitly.
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["@setup $(ARGS)", "echo building"] },
             "setup": { "commands": ["echo setup $(ARGS)"] }
@@ -2925,7 +2925,7 @@ fn run_target_unknown_target_errors() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo build"] }
         }
@@ -2959,7 +2959,7 @@ fn run_target_global_depends_on_skips_self() {
 	// After globals merge, self-referencing before steps are filtered out.
 	// A target with no before should run successfully.
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "init": { "commands": ["echo init"] }
         }
@@ -2978,7 +2978,7 @@ fn extract_unknown_target_errors() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo build"] }
         }
@@ -3000,7 +3000,7 @@ fn extract_with_working_directory_cwd() {
 	use runfile_parser::Runfile;
 
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "test": {
                 "commands": ["echo test"],

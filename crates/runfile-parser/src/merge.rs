@@ -202,7 +202,7 @@ fn merge_runfiles_inner(
 
 		local_runfile.schema
 	} else {
-		"https://runfile.io/schemas/v0".to_string()
+		"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".to_string()
 	};
 
 	// Detect conflicts: targets defined in multiple source files

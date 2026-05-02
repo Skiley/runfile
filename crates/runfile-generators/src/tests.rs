@@ -13,7 +13,7 @@ fn make_runfile(targets: Vec<(&str, Vec<&str>)>) -> Runfile {
 		);
 	}
 	Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: target_map,
 		globals: None,
@@ -262,7 +262,7 @@ fn jetbrains_xml_is_valid_structure() {
 #[test]
 fn zed_no_targets_empty_result() {
 	let runfile = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: HashMap::new(),
 		globals: None,
@@ -334,7 +334,7 @@ fn zed_merge_no_overlap() {
 #[test]
 fn jetbrains_no_targets_empty_result() {
 	let runfile = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: HashMap::new(),
 		globals: None,

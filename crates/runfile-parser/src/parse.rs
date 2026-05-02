@@ -14,7 +14,7 @@ pub enum ParseError {
 	#[error("Failed to parse Runfile: {0}")]
 	Json(#[from] json5::Error),
 
-	#[error("Empty $schema field — set it to \"https://runfile.io/schemas/v0\" or a schema URL")]
+	#[error("Empty $schema field — set it to \"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json\" or a schema URL")]
 	EmptySchema,
 
 	#[error("Target name \"{0}\" must not start with ':' (reserved for built-in commands)")]

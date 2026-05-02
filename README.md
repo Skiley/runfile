@@ -10,7 +10,7 @@ $ run dev --port=4000
 
 ```jsonc
 {
-  "$schema": "https://runfile.io/schemas/v0",
+  "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
   "targets": {
     "dev": {
       "description": "Start the dev server",
@@ -210,7 +210,7 @@ This drops a minimal Runfile you can edit:
 
 ```jsonc
 {
-  "$schema": "https://runfile.io/schemas/v0",
+  "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
   "targets": {
     // Single-command targets can use a plain string instead of an array.
     "build": { "commands": "cargo build --release" },

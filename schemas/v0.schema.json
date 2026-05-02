@@ -1,6 +1,6 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
-	"$id": "https://runfile.io/schemas/v0",
+	"$id": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 	"title": "Runfile",
 	"description": "Schema for Runfile.json — a modern, cross-platform command runner configuration.",
 	"type": "object",
@@ -12,7 +12,7 @@
 	"properties": {
 		"$schema": {
 			"type": "string",
-			"description": "Schema version identifier. Use \"https://runfile.io/schemas/v0\" during development, or a URL/path to this schema file."
+			"description": "Schema version identifier. Use \"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json\" during development, or a URL/path to this schema file."
 		},
 		"includes": {
 			"type": "array",

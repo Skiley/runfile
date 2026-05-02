@@ -7,13 +7,13 @@ use tempfile::TempDir;
 #[test]
 fn parse_minimal_runfile() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"] }
         }
     }"#;
 	let rf = parse_runfile(json).unwrap();
-	assert_eq!(rf.schema, "https://runfile.io/schemas/v0");
+	assert_eq!(rf.schema, "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json");
 	assert_eq!(rf.targets.len(), 1);
 	assert_eq!(rf.targets["build"].commands, vec!["cargo build"]);
 	assert!(rf.globals.is_none());
@@ -22,7 +22,7 @@ fn parse_minimal_runfile() {
 #[test]
 fn parse_full_runfile() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["npm run build $(ARGS)"]
@@ -55,7 +55,7 @@ fn parse_full_runfile() {
 #[test]
 fn parse_runfile_with_bool_env() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "test": {
                 "commands": ["cargo test"],
@@ -72,7 +72,7 @@ fn parse_runfile_with_bool_env() {
 #[test]
 fn parse_runfile_with_env_files() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "dev": {
                 "commands": ["npm start"],
@@ -119,7 +119,7 @@ fn reject_empty_schema() {
 #[test]
 fn accept_any_nonempty_schema() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": { "x": { "commands": ["echo hi"] } }
     }"#;
 	assert!(parse_runfile(json).is_ok());
@@ -134,7 +134,7 @@ fn accept_any_nonempty_schema() {
 #[test]
 fn reject_empty_targets_map() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {}
     }"#;
 	let err = parse_runfile(json).unwrap_err();
@@ -144,7 +144,7 @@ fn reject_empty_targets_map() {
 #[test]
 fn reject_command_with_empty_list() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": { "bad": { "commands": [] } }
     }"#;
 	let err = parse_runfile(json).unwrap_err();
@@ -154,7 +154,7 @@ fn reject_command_with_empty_list() {
 #[test]
 fn reject_unknown_top_level_field() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": { "x": { "commands": ["echo"] } },
         "extra": true
     }"#;
@@ -164,7 +164,7 @@ fn reject_unknown_top_level_field() {
 #[test]
 fn reject_unknown_command_field() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "x": { "commands": ["echo"], "unknown_field": 42 }
         }
@@ -175,7 +175,7 @@ fn reject_unknown_command_field() {
 #[test]
 fn reject_unknown_globals_field() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": { "x": { "commands": ["echo"] } },
         "globals": { "badField": true }
     }"#;
@@ -193,7 +193,7 @@ fn reject_missing_schema() {
 #[test]
 fn reject_missing_targets_key() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0"
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json"
     }"#;
 	assert!(parse_runfile(json).is_err());
 }
@@ -206,7 +206,7 @@ fn discover_in_current_dir() {
 	let runfile_path = dir.path().join(RUNFILE_NAME);
 	std::fs::write(
 		&runfile_path,
-		r#"{"$schema":"https://runfile.io/schemas/v0","targets":{"a":{"commands":["echo"]}}}"#,
+		r#"{"$schema":"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json","targets":{"a":{"commands":["echo"]}}}"#,
 	)
 	.unwrap();
 
@@ -223,7 +223,7 @@ fn discover_in_parent_dir() {
 	let runfile_path = dir.path().join(RUNFILE_NAME);
 	std::fs::write(
 		&runfile_path,
-		r#"{"$schema":"https://runfile.io/schemas/v0","targets":{"a":{"commands":["echo"]}}}"#,
+		r#"{"$schema":"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json","targets":{"a":{"commands":["echo"]}}}"#,
 	)
 	.unwrap();
 
@@ -260,7 +260,7 @@ fn parse_from_file() {
 	std::fs::write(
 		&path,
 		r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "hello": { "commands": ["echo hello world"] }
         }
@@ -286,7 +286,7 @@ fn roundtrip_serialization() {
 	targets.insert("build".into(), CommandSpec::new(vec!["cargo build".into()]));
 
 	let runfile = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets,
 		globals: Some(Globals {
@@ -312,7 +312,7 @@ fn roundtrip_serialization() {
 #[test]
 fn parse_many_commands() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["npm run build"] },
             "test": { "commands": ["npm test"] },
@@ -328,7 +328,7 @@ fn parse_many_commands() {
 #[test]
 fn parse_globals_only_add_to_path() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": { "x": { "commands": ["echo"] } },
         "globals": { "addToPath": ["/usr/local/bin", "vendor/bin"] }
     }"#;
@@ -342,7 +342,7 @@ fn parse_globals_only_add_to_path() {
 #[test]
 fn parse_globals_only_env() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": { "x": { "commands": ["echo"] } },
         "globals": { "env": { "A": "1", "B": 2 } }
     }"#;
@@ -356,7 +356,7 @@ fn parse_globals_only_env() {
 #[test]
 fn parse_command_with_args_placeholder() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "run": { "commands": ["node app.js $(ARGS)"] }
         }
@@ -368,7 +368,7 @@ fn parse_command_with_args_placeholder() {
 #[test]
 fn parse_command_with_conditional_args() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "dev": {
                 "commands": ["npm run dev"],
@@ -384,7 +384,7 @@ fn parse_command_with_conditional_args() {
 #[test]
 fn parse_command_with_description() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "description": "Build the project",
@@ -403,7 +403,7 @@ fn parse_command_with_description() {
 #[test]
 fn parse_command_with_force_shell() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "ps-task": {
                 "commands": ["Write-Host hello"],
@@ -427,7 +427,7 @@ fn parse_command_with_force_shell() {
 #[test]
 fn parse_command_force_shell_overrides_global() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "special": {
                 "commands": ["Write-Host hello"],
@@ -450,7 +450,7 @@ fn parse_command_force_shell_overrides_global() {
 #[test]
 fn parse_command_with_add_to_path() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["my-tool build"],
@@ -476,7 +476,7 @@ fn parse_command_with_add_to_path() {
 #[test]
 fn parse_logging_on_command() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "verbose": {
                 "commands": ["echo step1", "echo step2"],
@@ -500,7 +500,7 @@ fn parse_logging_on_command() {
 #[test]
 fn parse_logging_on_globals() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "x": { "commands": ["echo"] }
         },
@@ -515,7 +515,7 @@ fn parse_logging_on_globals() {
 #[test]
 fn parse_command_logging_overrides_global() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "quiet": {
                 "commands": ["echo"],
@@ -536,7 +536,7 @@ fn parse_command_logging_overrides_global() {
 #[test]
 fn parse_ignore_errors_on_command() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "risky": {
                 "commands": ["echo a", "echo b"],
@@ -555,7 +555,7 @@ fn parse_ignore_errors_on_command() {
 #[test]
 fn parse_ignore_errors_on_globals() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "x": { "commands": ["echo"] }
         },
@@ -570,7 +570,7 @@ fn parse_ignore_errors_on_globals() {
 #[test]
 fn reject_target_name_starting_with_colon() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             ":build": { "commands": ["echo"] }
         }
@@ -582,7 +582,7 @@ fn reject_target_name_starting_with_colon() {
 #[test]
 fn reject_target_name_colon_list() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             ":list": { "commands": ["echo"] }
         }
@@ -594,7 +594,7 @@ fn reject_target_name_colon_list() {
 #[test]
 fn accept_target_names_with_colon_not_at_start() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "ci:build": { "commands": ["echo"] },
             "test:unit": { "commands": ["echo"] }
@@ -606,7 +606,7 @@ fn accept_target_names_with_colon_not_at_start() {
 #[test]
 fn accept_previously_reserved_target_names() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "list": { "commands": ["echo"] },
             "config": { "commands": ["echo"] },
@@ -621,7 +621,7 @@ fn accept_previously_reserved_target_names() {
 #[test]
 fn parse_target_with_aliases() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "stop-dev": { "commands": ["./stop.sh"], "aliases": ["stop", "sd"] }
         }
@@ -637,7 +637,7 @@ fn parse_target_with_aliases() {
 #[test]
 fn resolve_target_by_name() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["b"] }
         }
@@ -649,7 +649,7 @@ fn resolve_target_by_name() {
 #[test]
 fn resolve_target_by_alias() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["b"] }
         }
@@ -661,7 +661,7 @@ fn resolve_target_by_alias() {
 #[test]
 fn resolve_target_unknown_returns_none() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"] }
         }
@@ -673,7 +673,7 @@ fn resolve_target_unknown_returns_none() {
 #[test]
 fn all_target_names_includes_aliases() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["b"] },
             "test": { "commands": ["cargo test"] }
@@ -689,7 +689,7 @@ fn all_target_names_includes_aliases() {
 #[test]
 fn reject_alias_conflicts_with_target() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["test"] },
             "test": { "commands": ["cargo test"] }
@@ -702,7 +702,7 @@ fn reject_alias_conflicts_with_target() {
 #[test]
 fn reject_duplicate_alias_across_targets() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["x"] },
             "test": { "commands": ["cargo test"], "aliases": ["x"] }
@@ -715,7 +715,7 @@ fn reject_duplicate_alias_across_targets() {
 #[test]
 fn reject_alias_starting_with_colon() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": [":b"] }
         }
@@ -727,7 +727,7 @@ fn reject_alias_starting_with_colon() {
 #[test]
 fn accept_alias_with_colon_not_at_start() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["ci:b"] }
         }
@@ -738,7 +738,7 @@ fn accept_alias_with_colon_not_at_start() {
 #[test]
 fn reject_alias_same_as_target() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["cargo build"], "aliases": ["build"] }
         }
@@ -752,7 +752,7 @@ fn reject_alias_same_as_target() {
 #[test]
 fn parse_working_directory_on_target() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
@@ -767,7 +767,7 @@ fn parse_working_directory_on_target() {
 #[test]
 fn parse_working_directory_runfile_parent() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
@@ -782,7 +782,7 @@ fn parse_working_directory_runfile_parent() {
 #[test]
 fn parse_working_directory_on_globals() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo"] }
         },
@@ -797,7 +797,7 @@ fn parse_working_directory_on_globals() {
 #[test]
 fn parse_working_directory_absent_is_none() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo"] }
         }
@@ -809,7 +809,7 @@ fn parse_working_directory_absent_is_none() {
 #[test]
 fn reject_invalid_working_directory() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
@@ -889,7 +889,7 @@ fn json5_real_error_propagated() {
 #[test]
 fn json5_runfile_with_comments() {
 	let input = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		// Build targets
 		"targets": {
 			"build": {
@@ -906,7 +906,7 @@ fn json5_runfile_with_comments() {
 #[test]
 fn merge_local_only_no_global_files() {
 	let runfile = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: {
 			let mut t = HashMap::new();
@@ -928,7 +928,7 @@ fn merge_global_only_no_local() {
 	let global_path = dir.path().join("global.json");
 	std::fs::write(
 		&global_path,
-		r#"{ "$schema": "https://runfile.io/schemas/v0", "targets": { "lint": { "commands": ["cargo clippy"] } } }"#,
+		r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": { "lint": { "commands": ["cargo clippy"] } } }"#,
 	)
 	.unwrap();
 
@@ -943,12 +943,12 @@ fn merge_local_and_global_conflict() {
 	let global_path = dir.path().join("global.json");
 	std::fs::write(
 		&global_path,
-		r#"{ "$schema": "https://runfile.io/schemas/v0", "targets": { "build": { "commands": ["global build"] }, "deploy": { "commands": ["deploy"] } } }"#,
+		r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": { "build": { "commands": ["global build"] }, "deploy": { "commands": ["deploy"] } } }"#,
 	)
 	.unwrap();
 
 	let local = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: {
 			let mut t = HashMap::new();
@@ -1002,7 +1002,7 @@ fn merge_only_in_directories_filters() {
 	let global_path = base.path().join("global.json");
 	std::fs::write(
         &global_path,
-        r#"{ "$schema": "https://runfile.io/schemas/v0", "targets": { "lint": { "commands": ["lint"] } }, "globals": { "onlyInDirectories": ["allowed"] } }"#,
+        r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": { "lint": { "commands": ["lint"] } }, "globals": { "onlyInDirectories": ["allowed"] } }"#,
     )
     .unwrap();
 
@@ -1021,7 +1021,7 @@ fn merge_missing_global_file_skipped() {
 	let missing = dir.path().join("nonexistent.json");
 
 	let local = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: {
 			let mut t = HashMap::new();
@@ -1042,7 +1042,7 @@ fn merge_globals_baked_into_targets() {
 	let global_path = dir.path().join("global.json");
 	std::fs::write(
         &global_path,
-        r#"{ "$schema": "https://runfile.io/schemas/v0", "targets": { "build": { "commands": ["build"] } }, "globals": { "logging": true, "env": { "FOO": "bar" } } }"#,
+        r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": { "build": { "commands": ["build"] } }, "globals": { "logging": true, "env": { "FOO": "bar" } } }"#,
     )
     .unwrap();
 
@@ -1061,12 +1061,12 @@ fn merge_source_dirs_tracked() {
 	let global_path = global_dir.join(RUNFILE_NAME);
 	std::fs::write(
 		&global_path,
-		r#"{ "$schema": "https://runfile.io/schemas/v0", "targets": { "lint": { "commands": ["lint"] } } }"#,
+		r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": { "lint": { "commands": ["lint"] } } }"#,
 	)
 	.unwrap();
 
 	let local = Runfile {
-		schema: "https://runfile.io/schemas/v0".into(),
+		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".into(),
 		includes: None,
 		targets: {
 			let mut t = HashMap::new();
@@ -1087,7 +1087,7 @@ fn merge_source_dirs_tracked() {
 #[test]
 fn cross_file_target_refs_accepted_at_parse_time() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "deploy": {
                 "commands": ["@build", "deploy"]
@@ -1102,7 +1102,7 @@ fn cross_file_target_refs_accepted_at_parse_time() {
 
 #[test]
 fn partial_parse_allows_zero_targets() {
-	let json = r#"{ "$schema": "https://runfile.io/schemas/v0", "targets": {} }"#;
+	let json = r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": {} }"#;
 	assert!(parse_runfile(json).is_err());
 	assert!(parse_runfile_partial(json).is_ok());
 }
@@ -1110,7 +1110,7 @@ fn partial_parse_allows_zero_targets() {
 #[test]
 fn reject_detach_without_parallel_multiple_commands() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "bg": {
                 "commands": ["echo hello", "echo world"],
@@ -1126,7 +1126,7 @@ fn reject_detach_without_parallel_multiple_commands() {
 #[test]
 fn reject_detach_without_parallel_multiple_commands_partial() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "bg": {
                 "commands": ["echo hello", "echo world"],
@@ -1141,7 +1141,7 @@ fn reject_detach_without_parallel_multiple_commands_partial() {
 #[test]
 fn accept_detach_single_command_without_parallel() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "bg": {
                 "commands": ["echo hello"],
@@ -1155,7 +1155,7 @@ fn accept_detach_single_command_without_parallel() {
 #[test]
 fn accept_detach_with_parallel() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "bg": {
                 "commands": ["echo hello", "echo world"],
@@ -1170,7 +1170,7 @@ fn accept_detach_with_parallel() {
 #[test]
 fn accept_parallel_without_detach() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "multi": {
                 "commands": ["echo a", "echo b"],
@@ -1225,7 +1225,7 @@ fn is_valid_env_key_rejects_special_chars() {
 #[test]
 fn parse_rejects_invalid_env_key_in_target() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo test"],
@@ -1246,7 +1246,7 @@ fn parse_rejects_invalid_env_key_in_target() {
 #[test]
 fn parse_rejects_env_key_with_ampersand() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "test": {
                 "commands": ["echo test"],
@@ -1261,7 +1261,7 @@ fn parse_rejects_env_key_with_ampersand() {
 #[test]
 fn parse_rejects_env_key_with_dollar_sign() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "test": {
                 "commands": ["echo test"],
@@ -1276,7 +1276,7 @@ fn parse_rejects_env_key_with_dollar_sign() {
 #[test]
 fn parse_rejects_env_key_starting_with_digit() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "test": {
                 "commands": ["echo test"],
@@ -1291,7 +1291,7 @@ fn parse_rejects_env_key_starting_with_digit() {
 #[test]
 fn parse_rejects_invalid_env_key_in_globals() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": { "commands": ["echo test"] }
         },
@@ -1308,7 +1308,7 @@ fn parse_rejects_invalid_env_key_in_globals() {
 #[test]
 fn parse_accepts_valid_env_keys() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo test"],
@@ -1332,7 +1332,7 @@ fn parse_accepts_valid_env_keys() {
 #[test]
 fn parse_partial_also_rejects_invalid_env_keys() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo test"],
@@ -1560,7 +1560,7 @@ fn include_absolute_path_outside_project_rejected() {
 #[test]
 fn parse_extend_stdio() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["npm run build"],
@@ -1583,7 +1583,7 @@ fn parse_extend_stdio() {
 #[test]
 fn parse_extend_stdio_rejects_unknown_stream() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
@@ -1600,7 +1600,7 @@ fn parse_extend_stdio_rejects_unknown_stream() {
 fn parse_extend_stdio_rejects_missing_fields() {
 	// Missing "stream"
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
@@ -1612,7 +1612,7 @@ fn parse_extend_stdio_rejects_missing_fields() {
 
 	// Missing "fromFile"
 	let json2 = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
@@ -1628,7 +1628,7 @@ fn parse_extend_stdio_rejects_missing_fields() {
 #[test]
 fn parse_force_kill_on_sig_int() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "unity": {
                 "commands": ["unity -batchmode"],
@@ -1643,7 +1643,7 @@ fn parse_force_kill_on_sig_int() {
 #[test]
 fn parse_force_kill_on_sig_int_in_globals() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "globals": {
             "forceKillOnSigInt": true
         },
@@ -1662,7 +1662,7 @@ fn parse_force_kill_on_sig_int_in_globals() {
 #[test]
 fn parse_accepts_internal_target_name() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "_setup": { "commands": ["echo internal"] },
             "build":  { "commands": ["cargo build"] }
@@ -1677,7 +1677,7 @@ fn parse_accepts_internal_target_name() {
 #[test]
 fn is_internal_resolves_through_aliases() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "_setup": {
                 "commands": ["echo internal"],
@@ -1699,7 +1699,7 @@ fn is_internal_resolves_through_aliases() {
 #[test]
 fn public_target_names_excludes_internal_targets_and_their_aliases() {
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "_setup": {
                 "commands": ["echo internal"],
@@ -1731,7 +1731,7 @@ fn internal_target_can_be_referenced_via_at_call() {
 	// `@` invocations to internal targets (`_name`) are valid — internal-only
 	// means "not directly invocable from the CLI", not "uncallable".
 	let json = r#"{
-        "$schema": "https://runfile.io/schemas/v0",
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "_setup": { "commands": ["echo setup"] },
             "build": {
@@ -1753,7 +1753,7 @@ fn internal_target_can_be_referenced_via_at_call() {
 #[test]
 fn parse_if_block_with_string_then() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"deploy": {
 				"commands": [
@@ -1778,7 +1778,7 @@ fn parse_if_block_with_string_then() {
 #[test]
 fn parse_if_block_with_else() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"deploy": {
 				"commands": [
@@ -1802,7 +1802,7 @@ fn parse_if_block_with_else() {
 #[test]
 fn parse_if_block_with_ignore_errors() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"clean": {
 				"commands": [
@@ -1822,7 +1822,7 @@ fn parse_if_block_with_ignore_errors() {
 #[test]
 fn parse_if_block_then_as_string_shorthand() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"deploy": {
 				"commands": [
@@ -1844,7 +1844,7 @@ fn parse_if_block_then_as_string_shorthand() {
 #[test]
 fn parse_if_block_else_as_string_shorthand() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"deploy": {
 				"commands": [
@@ -1869,7 +1869,7 @@ fn parse_if_block_else_as_string_shorthand() {
 fn parse_if_block_mixed_string_then_array_else() {
 	// String `then` + array `else` and vice versa should both work side by side.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": {
 				"commands": [
@@ -1902,7 +1902,7 @@ fn parse_target_commands_as_string_shorthand() {
 	// A bare string in place of the `commands` array should be treated as a
 	// one-element array containing a single shell step.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": "cargo build" }
 		}
@@ -1917,7 +1917,7 @@ fn parse_target_commands_as_string_shorthand() {
 fn parse_target_commands_string_shorthand_target_call() {
 	// The `@target` shorthand applies even when `commands` is a string.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"a": { "commands": "@b --release" },
 			"b": { "commands": ["cargo build --release"] }
@@ -1938,7 +1938,7 @@ fn parse_target_commands_string_shorthand_target_call() {
 fn parse_when_step_commands_as_string_shorthand() {
 	// `when:` blocks accept the same string shorthand for `commands`.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": {
 				"commands": [
@@ -1964,7 +1964,7 @@ fn parse_when_step_commands_as_string_shorthand() {
 fn parse_target_commands_as_array_still_works() {
 	// Adding the string shorthand must not break the existing array form.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["cargo build", "echo done"] }
 		}
@@ -1981,7 +1981,7 @@ fn parse_target_commands_as_array_still_works() {
 #[test]
 fn parse_when_block_default_success() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [{ "commands": ["echo hi"] }] }
 		}
@@ -1998,7 +1998,7 @@ fn parse_when_block_default_success() {
 #[test]
 fn parse_when_block_failure() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [{ "when": "failure", "commands": ["./report.sh"] }] }
 		}
@@ -2014,7 +2014,7 @@ fn parse_when_block_failure() {
 #[test]
 fn parse_when_block_always() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [{ "when": "always", "commands": ["./cleanup.sh"] }] }
 		}
@@ -2030,7 +2030,7 @@ fn parse_when_block_always() {
 #[test]
 fn parse_when_on_if_block() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [
 				{ "when": "always", "if": "$(RUN.os) == windows", "then": "rm -rf tmp" }
@@ -2048,7 +2048,7 @@ fn parse_when_on_if_block() {
 #[test]
 fn parse_when_on_for_block() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [
 				{ "when": "failure", "for": "f", "glob": "logs/*", "do": ["cat $(LOOP.f)"] }
@@ -2066,7 +2066,7 @@ fn parse_when_on_for_block() {
 #[test]
 fn parse_when_block_with_ignore_errors() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [
 				{ "when": "always", "commands": ["./cleanup.sh"], "ignoreErrors": true }
@@ -2084,7 +2084,7 @@ fn parse_when_block_with_ignore_errors() {
 #[test]
 fn parse_when_block_rejects_empty_commands() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [{ "when": "always", "commands": [] }] }
 		}
@@ -2095,7 +2095,7 @@ fn parse_when_block_rejects_empty_commands() {
 #[test]
 fn parse_when_block_rejects_unknown_when_value() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": [{ "when": "sometimes", "commands": ["echo"] }] }
 		}
@@ -2108,7 +2108,7 @@ fn parse_when_block_rejects_unknown_when_value() {
 #[test]
 fn parse_target_call_no_args() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["echo build"] },
 			"ci": { "commands": ["@build"] }
@@ -2126,7 +2126,7 @@ fn parse_target_call_no_args() {
 #[test]
 fn parse_target_call_with_args() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["echo build"] },
 			"ci": { "commands": ["@build --release --features foo"] }
@@ -2146,7 +2146,7 @@ fn parse_target_call_with_args_substitution_template() {
 	// $(ARGS) and $(RUN.os) are preserved in the args_template — substitution
 	// happens at runtime.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["echo build"] },
 			"ci": { "commands": ["@build $(ARGS) --os=$(RUN.os)"] }
@@ -2162,7 +2162,7 @@ fn parse_target_call_with_args_substitution_template() {
 #[test]
 fn parse_target_call_inside_if_branches() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"prod-deploy": { "commands": ["echo prod"] },
 			"dev-deploy": { "commands": ["echo dev"] },
@@ -2186,7 +2186,7 @@ fn parse_target_call_inside_if_branches() {
 #[test]
 fn parse_target_call_inside_for_body() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["echo build"] },
 			"matrix": {
@@ -2210,7 +2210,7 @@ fn parse_target_call_inside_for_body() {
 fn parse_target_call_with_quoted_args() {
 	// Quoted args are kept verbatim — shlex-splitting happens at execute time.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"echo": { "commands": ["echo $(ARGS)"] },
 			"t": { "commands": ["@echo \"hello world\" foo"] }
@@ -2227,7 +2227,7 @@ fn parse_target_call_with_quoted_args() {
 fn parse_target_call_rejects_empty_target_name() {
 	// `@` alone or `@ args` is rejected at parse time.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": ["@ foo"] }
 		}
@@ -2243,7 +2243,7 @@ fn parse_target_call_rejects_empty_target_name() {
 fn parse_target_call_serializes_back_to_string() {
 	// Round-trip: TargetCall serializes as the original `@target args` form.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["echo build"] },
 			"t": { "commands": ["@build --release"] }
@@ -2261,7 +2261,7 @@ fn parse_target_call_serializes_back_to_string() {
 fn parse_plain_string_with_at_inside_is_shell_command() {
 	// `email@host` (no leading @) is a plain shell command.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"t": { "commands": ["echo email@host"] }
 		}
@@ -2274,7 +2274,7 @@ fn parse_plain_string_with_at_inside_is_shell_command() {
 fn parse_if_block_string_then_rejects_object() {
 	// A non-array, non-string `then` should still be a parse error.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "if": "$(ARGS.x)", "then": { "if": "true", "then": [] } }
@@ -2287,7 +2287,7 @@ fn parse_if_block_string_then_rejects_object() {
 #[test]
 fn parse_if_block_empty_then_allowed() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"noop": { "commands": [
 				{ "if": "$(ARGS.x)", "then": [] }
@@ -2300,7 +2300,7 @@ fn parse_if_block_empty_then_allowed() {
 #[test]
 fn parse_if_rejects_empty_condition() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "if": "", "then": [] }
@@ -2315,7 +2315,7 @@ fn parse_if_rejects_empty_condition() {
 #[test]
 fn parse_if_rejects_malformed_condition() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "if": "a && b || c", "then": [] }
@@ -2329,7 +2329,7 @@ fn parse_if_rejects_malformed_condition() {
 #[test]
 fn parse_for_in_block() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build_each": {
 				"commands": [
@@ -2354,7 +2354,7 @@ fn parse_for_in_block() {
 #[test]
 fn parse_for_do_accepts_single_string() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"each": {
 				"commands": [
@@ -2375,7 +2375,7 @@ fn parse_for_do_accepts_single_string() {
 #[test]
 fn parse_for_glob_block() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"fmt": {
 				"commands": [
@@ -2395,7 +2395,7 @@ fn parse_for_glob_block() {
 #[test]
 fn parse_for_shell_block() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"check": {
 				"commands": [
@@ -2415,7 +2415,7 @@ fn parse_for_shell_block() {
 #[test]
 fn parse_for_rejects_no_iterator() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "for": "x", "do": ["echo $(LOOP.x)"] }
@@ -2430,7 +2430,7 @@ fn parse_for_rejects_no_iterator() {
 #[test]
 fn parse_for_rejects_multiple_iterators() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "for": "x", "in": ["a"], "glob": "*.rs", "do": [] }
@@ -2445,7 +2445,7 @@ fn parse_for_rejects_multiple_iterators() {
 #[test]
 fn parse_for_rejects_invalid_var_name() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "for": "1abc", "in": ["x"], "do": [] }
@@ -2459,7 +2459,7 @@ fn parse_for_rejects_invalid_var_name() {
 #[test]
 fn parse_for_with_parallel_flag() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"par": {
 				"commands": [
@@ -2479,7 +2479,7 @@ fn parse_for_with_parallel_flag() {
 #[test]
 fn parse_nested_control_flow() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"complex": {
 				"commands": [
@@ -2501,7 +2501,7 @@ fn parse_nested_control_flow() {
 #[test]
 fn parse_unknown_control_flow_field_rejected() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "if": "$(ARGS.x)", "then": [], "extraField": 1 }
@@ -2514,7 +2514,7 @@ fn parse_unknown_control_flow_field_rejected() {
 #[test]
 fn parse_object_without_if_or_for_rejected() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"bad": { "commands": [
 				{ "foo": "bar" }
@@ -2530,7 +2530,7 @@ fn parse_control_flow_inside_when_block() {
 	// step's previous "run inline commands first" role is now just
 	// prepending to `commands`; the always/failure-only cases use `when`.
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"deploy": {
 				"commands": [
@@ -2546,7 +2546,7 @@ fn parse_control_flow_inside_when_block() {
 #[test]
 fn parse_backwards_compat_string_only_commands_still_works() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"build": { "commands": ["cargo build", "cargo test"] }
 		}
@@ -2561,7 +2561,7 @@ fn parse_backwards_compat_string_only_commands_still_works() {
 #[test]
 fn walk_step_templates_visits_all_string_payloads() {
 	let json = r#"{
-		"$schema": "https://runfile.io/schemas/v0",
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 		"targets": {
 			"x": {
 				"commands": [
