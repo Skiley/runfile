@@ -13,7 +13,10 @@ fn parse_minimal_runfile() {
         }
     }"#;
 	let rf = parse_runfile(json).unwrap();
-	assert_eq!(rf.schema, "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json");
+	assert_eq!(
+		rf.schema,
+		"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json"
+	);
 	assert_eq!(rf.targets.len(), 1);
 	assert_eq!(rf.targets["build"].commands, vec!["cargo build"]);
 	assert!(rf.globals.is_none());
@@ -1102,7 +1105,8 @@ fn cross_file_target_refs_accepted_at_parse_time() {
 
 #[test]
 fn partial_parse_allows_zero_targets() {
-	let json = r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": {} }"#;
+	let json =
+		r#"{ "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json", "targets": {} }"#;
 	assert!(parse_runfile(json).is_err());
 	assert!(parse_runfile_partial(json).is_ok());
 }
