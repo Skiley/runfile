@@ -135,8 +135,6 @@ jobs:
             --artifacts dist-artifacts \
             --out npm-dist
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for dir in npm-dist/runfile-*; do
             (cd "$dir" && npm publish --access public --provenance)
