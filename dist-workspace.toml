@@ -7,7 +7,6 @@ ci = "github"
 installers = [
 	"shell",
 	"powershell",
-	"npm"
 ]
 targets = [
   "aarch64-apple-darwin",
@@ -20,9 +19,6 @@ targets = [
 install-path = "~/.local/bin"
 hosting = "github"
 install-updater = false
-npm-scope = "@skiley"
-npm-package = "runfile"
-publish-jobs = ["npm"]
 
 [[dist.extra-artifacts]]
 artifacts = ["v0.schema.json"]

@@ -3,6 +3,8 @@
 /target-linux/
 /target-mac/
 /target-windows/
+/npm-dist/
+/dist-artifacts/
 
 # IDE
 .idea/
