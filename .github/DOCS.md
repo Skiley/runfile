@@ -229,7 +229,7 @@ $ run --dry-run deploy
 ```
 
 - `$schema` (required): Schema version identifier.
-- `includes` (optional): Array of paths to other Runfile.json files to include. Paths are relative to this file. Included targets are merged — local targets win on conflict. Supports recursive includes with cycle detection.
+- `includes` (optional): Array of [include entries](#file-includes) — each is either a path string or `{ "path": "...", "namespace": "..." }`. Paths are relative to this file. Included targets are merged — local targets win on conflict. Supports recursive includes with cycle detection. With `namespace`, every included target name and every `@target` reference inside that file is prefixed with `<namespace>:`.
 - `targets` (required): Named targets to run.
 - `globals` (optional): Settings applied to all targets.
 
@@ -1309,6 +1309,16 @@ If an internal target has aliases, they are also blocked from direct invocation 
 
 The internal flag is determined solely by the **canonical** name. Adding an alias that starts with `_` to a public target does not make that target internal.
 
+### Internal targets in namespaced includes
+
+Internal-ness is checked against the **last** `:`-separated segment of the
+canonical name, so a target named `_helper` defined inside a file included
+under namespace `api` becomes `api:_helper` and is still treated as
+internal — hidden from `:list` and rejected as `run api:_helper`, but
+callable via `@api:_helper` from another target's commands and via `@_helper`
+from inside the included file itself (which gets rewritten to `@api:_helper`
+during the namespacing pass).
+
 ---
 
 ## When-guarded blocks (`when:`)
@@ -1419,18 +1429,22 @@ Flags:
 
 ## File Includes
 
-Use `includes` to pull targets from other Runfile.json files:
+Use `includes` to pull targets from other Runfile.json files. Each entry is
+either a plain path string or an object with a `path` and an optional
+`namespace`:
 
 ```json
 {
 	"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 	"includes": [
 		"./shared/ci.runfile.json",
-		"./tools.runfile.json"
+		{ "path": "./packages/api/Runfile.json",  "namespace": "api" },
+		{ "path": "./packages/web/Runfile.json",  "namespace": "web" }
 	],
 	"targets": {
 		"build": {
-			"commands": ["cargo build"]
+			"commands": ["@api:build", "@web:build"],
+			"parallel": true
 		}
 	}
 }
@@ -1442,6 +1456,45 @@ Use `includes` to pull targets from other Runfile.json files:
 - Included files can themselves include other files (recursive includes supported).
 - Cycle detection prevents circular includes.
 - Each included file's `globals` are baked into its own targets only — they don't leak into the including file's targets.
+
+### Namespacing
+
+When you set a `namespace` on an include, every target name, alias, and
+`@target` reference inside that file is prefixed with `<namespace>:` at parse
+time:
+
+- A target `build` in the included file becomes `api:build` in the merged Runfile.
+- An alias `b` becomes `api:b`.
+- A `@target` reference inside that file's commands gets the same prefix —
+  e.g. an included file's `@build` becomes `@api:build` automatically. This
+  means **included files are sealed**: `@target` references inside them
+  resolve only against the included file's own targets, never against the
+  parent's. The same is true for nested includes — the prefix composes
+  outward, so an included file that itself includes another file under
+  namespace `inner` ends up with targets like `api:inner:build`.
+
+This makes monorepo-style layouts where each package owns its own Runfile
+straightforward: aggregate targets in the root call into each package by
+namespace, and `parallel: true` fans them out concurrently — similar to
+`pnpm --recursive --parallel`.
+
+**Namespace rules.** A namespace must be non-empty and may not contain `:`
+or whitespace, or start with `@`, `:`, or `_`. An empty or omitted
+`namespace` field is equivalent to the path-string form (no rewrite applied).
+The same file may be included twice under different namespaces — the targets
+end up as independent copies (e.g. `api:build` and `web:build` both come
+from a shared template).
+
+**Internal targets stay internal.** The `_`-prefix rule (see [Internal
+targets](#internal-targets)) is applied to the **last** `:`-separated
+segment of the canonical name, so `api:_helper` is still treated as
+internal — hidden from `:list`, completions, and direct CLI invocation, but
+still callable via `@api:_helper` from another target's commands.
+
+**Working directory.** A namespaced target's `workingDirectory: "runfileParent"`
+resolves to the directory of the file that defined it, not the root's. Same
+for relative `envFiles` paths. This lets each package's commands run with
+their own cwd without extra plumbing.
 
 ---
 

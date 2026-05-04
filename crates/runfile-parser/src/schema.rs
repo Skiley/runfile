@@ -528,8 +528,15 @@ pub struct Runfile {
 	pub schema: String,
 
 	/// Other Runfile.json files to include (paths relative to this file).
+	///
+	/// Each entry is either a plain path string (no namespace) or an object
+	/// `{ "path": "...", "namespace": "..." }`. When a namespace is set, every
+	/// target name and every `@target` reference inside that included file is
+	/// prefixed with `<namespace>:`. Children are sealed: a `@target`
+	/// reference inside an included file resolves to that file's own targets,
+	/// never to the parent's. Nested includes compose left-to-right.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub includes: Option<Vec<String>>,
+	pub includes: Option<Vec<IncludeEntry>>,
 
 	/// Named targets that can be invoked.
 	pub targets: HashMap<String, CommandSpec>,
@@ -537,6 +544,66 @@ pub struct Runfile {
 	/// Optional global configuration.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub globals: Option<Globals>,
+}
+
+/// A single entry in the `includes` array. Accepts either a plain string
+/// (path-only, no namespace) or an object `{ "path", "namespace" }`. The
+/// object form's `namespace` is optional — an absent or empty namespace
+/// behaves identically to the string form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IncludeEntry {
+	/// Path to the included Runfile, relative to the file that declares it
+	/// (or absolute, subject to the same path-traversal restriction as the
+	/// string form).
+	pub path: String,
+	/// Optional namespace prefix applied to every target name and every
+	/// `@target` reference inside the included file. `None` (or `Some("")`,
+	/// which is normalised to `None` at parse time) means no rewrite — the
+	/// include behaves exactly like the historical string-form entry.
+	pub namespace: Option<String>,
+}
+
+impl Serialize for IncludeEntry {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		use serde::ser::SerializeStruct;
+		match &self.namespace {
+			None => serializer.serialize_str(&self.path),
+			Some(ns) => {
+				let mut s = serializer.serialize_struct("IncludeEntry", 2)?;
+				s.serialize_field("path", &self.path)?;
+				s.serialize_field("namespace", ns)?;
+				s.end()
+			}
+		}
+	}
+}
+
+impl<'de> Deserialize<'de> for IncludeEntry {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		use serde_json::Value;
+		let v = Value::deserialize(deserializer)?;
+		match v {
+			Value::String(path) => Ok(IncludeEntry { path, namespace: None }),
+			Value::Object(map) => {
+				#[derive(Deserialize)]
+				#[serde(deny_unknown_fields)]
+				struct Obj {
+					path: String,
+					#[serde(default)]
+					namespace: Option<String>,
+				}
+				let obj: Obj = serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom)?;
+				let ns = obj.namespace.and_then(|s| if s.is_empty() { None } else { Some(s) });
+				Ok(IncludeEntry {
+					path: obj.path,
+					namespace: ns,
+				})
+			}
+			_ => Err(serde::de::Error::custom(
+				"include entry must be a string or an object with a \"path\" key",
+			)),
+		}
+	}
 }
 
 /// A single command specification (target).
@@ -656,11 +723,16 @@ impl CommandSpec {
 
 /// Internal targets cannot be invoked directly from the CLI and are hidden from
 /// `:list`, shell completions, MCP, and editor task generators. They are still
-/// fully usable from lifecycle hooks (`{ "target": "_setup" }`).
+/// fully usable from `@target` invocations inside another target's commands.
 ///
-/// A target is considered internal when its canonical name starts with `_`.
+/// A target is considered internal when the **last** `:`-separated segment of
+/// its canonical name starts with `_`. This means `_helper` is internal, and
+/// `child:_helper` (a namespaced internal target from an included file) is
+/// also internal — internal-ness rides along with the canonical name through
+/// namespacing.
 pub fn is_internal_target_name(name: &str) -> bool {
-	name.starts_with('_')
+	let last = name.rsplit_once(':').map_or(name, |(_, last)| last);
+	last.starts_with('_')
 }
 
 impl Runfile {

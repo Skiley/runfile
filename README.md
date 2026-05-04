@@ -266,9 +266,10 @@ $ run :convert makefile       # turns Makefile recipes into targets
 
 #### Plus
 
-Parallel & detached execution · file includes with cycle detection · global Runfiles · path aliases · confirmation
-prompts · `--dry-run` · `--timings` · force-kill on SIGINT (works for GUI apps like Unity) · stdio tailers · shell
-completions · MCP server.
+Parallel & detached execution · file includes with optional namespacing for monorepos
+(`pnpm --recursive --parallel`-style aggregation) · cycle detection · global Runfiles · path aliases ·
+confirmation prompts · `--dry-run` · `--timings` · force-kill on SIGINT (works for GUI apps like Unity) ·
+stdio tailers · shell completions · MCP server.
 
 ---
 

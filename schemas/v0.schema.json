@@ -16,9 +16,9 @@
 		},
 		"includes": {
 			"type": "array",
-			"description": "Other Runfile.json files to include. Paths are relative to this file. Included targets are merged (local wins on conflict).",
+			"description": "Other Runfile.json files to include. Each entry is either a path string (no namespace) or an object with `path` and an optional `namespace`. When a namespace is set, every target name and every `@target` reference inside that included file is prefixed with `<namespace>:`. Children are sealed: a `@target` reference inside an included file resolves to that file's own targets, never to the parent's. Nested includes compose left-to-right.",
 			"items": {
-				"type": "string"
+				"$ref": "#/$defs/IncludeEntry"
 			}
 		},
 		"targets": {
@@ -34,6 +34,32 @@
 		}
 	},
 	"$defs": {
+		"IncludeEntry": {
+			"description": "An entry in the top-level `includes` array. Either a path string (no namespace) or an object with `path` and an optional `namespace`. A blank or omitted namespace is equivalent to the string form.",
+			"oneOf": [
+				{
+					"type": "string"
+				},
+				{
+					"type": "object",
+					"required": [
+						"path"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "Path to the included Runfile, relative to the file that declares it."
+						},
+						"namespace": {
+							"type": "string",
+							"description": "Optional prefix applied to every target name, alias, and `@target` reference inside the included file. May not be empty (or omit the field), contain ':' or whitespace, or start with '@', ':', or '_'. Nested namespaces compose left-to-right.",
+							"pattern": "^[^_@:\\s][^:\\s]*$"
+						}
+					}
+				}
+			]
+		},
 		"CommandStep": {
 			"description": "A step inside a `commands` array. Either a raw shell command string, a target invocation (`@target [args...]` — string starting with `@`), a `when`-guarded block, or a control-flow block (`if` / `for` object).",
 			"oneOf": [
@@ -54,12 +80,18 @@
 		"WhenCondition": {
 			"description": "State guard for a step: when does it run relative to whether a prior step has failed?",
 			"type": "string",
-			"enum": ["success", "failure", "always"]
+			"enum": [
+				"success",
+				"failure",
+				"always"
+			]
 		},
 		"WhenStep": {
 			"type": "object",
 			"description": "A `when`-guarded block of command steps. Inner commands run only when the target's running state matches `when`.",
-			"required": ["commands"],
+			"required": [
+				"commands"
+			],
 			"additionalProperties": false,
 			"properties": {
 				"when": {
@@ -69,10 +101,14 @@
 				"commands": {
 					"description": "Steps to run when the gate matches. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",
 					"oneOf": [
-						{ "type": "string" },
+						{
+							"type": "string"
+						},
 						{
 							"type": "array",
-							"items": { "$ref": "#/$defs/CommandStep" },
+							"items": {
+								"$ref": "#/$defs/CommandStep"
+							},
 							"minItems": 1
 						}
 					]
@@ -99,20 +135,28 @@
 				"then": {
 					"description": "Steps executed when the condition is truthy. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",
 					"oneOf": [
-						{ "type": "string" },
+						{
+							"type": "string"
+						},
 						{
 							"type": "array",
-							"items": { "$ref": "#/$defs/CommandStep" }
+							"items": {
+								"$ref": "#/$defs/CommandStep"
+							}
 						}
 					]
 				},
 				"else": {
 					"description": "Steps executed when the condition is falsy. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",
 					"oneOf": [
-						{ "type": "string" },
+						{
+							"type": "string"
+						},
 						{
 							"type": "array",
-							"items": { "$ref": "#/$defs/CommandStep" }
+							"items": {
+								"$ref": "#/$defs/CommandStep"
+							}
 						}
 					]
 				},
@@ -158,7 +202,9 @@
 				"do": {
 					"description": "Body steps executed once per iteration. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",
 					"oneOf": [
-						{ "type": "string" },
+						{
+							"type": "string"
+						},
 						{
 							"type": "array",
 							"items": {
@@ -208,7 +254,7 @@
 			"properties": {
 				"description": {
 					"type": "string",
-					"description": "Human-readable description of what this target does. Shown in `runfile list` output."
+					"description": "Human-readable description of what this target does. Shown in `run :list` output."
 				},
 				"aliases": {
 					"type": "array",
@@ -220,7 +266,9 @@
 				"commands": {
 					"description": "Command steps to execute sequentially. May be a single shell-command string (sugar for a one-element array) or an array of command steps. Each array entry is either a raw shell command string or a control-flow object (`if` / `for` / `when`).",
 					"oneOf": [
-						{ "type": "string" },
+						{
+							"type": "string"
+						},
 						{
 							"type": "array",
 							"items": {

@@ -5,7 +5,7 @@
 //! startup when parsing — the perf cost is irrelevant.
 
 use crate::parse::parse_runfile_from_path_partial;
-use crate::schema::{CommandSpec, Globals, Runfile};
+use crate::schema::{CommandSpec, CommandStep, Globals, Runfile};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -29,6 +29,13 @@ pub enum MergeError {
 
 	#[error("Failed to parse included file {0}: {1}")]
 	IncludeParse(PathBuf, crate::parse::ParseError),
+
+	#[error("Invalid include namespace \"{namespace}\" for {path}: {reason}")]
+	InvalidIncludeNamespace {
+		path: PathBuf,
+		namespace: String,
+		reason: String,
+	},
 }
 
 /// Where a target originated from.
@@ -126,6 +133,30 @@ impl MergeState {
 			self.target_sources
 				.insert(name.clone(), (source_path.to_path_buf(), kind));
 			self.targets.insert(name, baked);
+		}
+	}
+
+	/// Fold a child sub-state into this state. Used by [`resolve_includes`]
+	/// once an include's tree has been fully resolved (and namespaced if
+	/// applicable). Conflict semantics mirror [`Self::insert_targets`]:
+	/// `all_sources` accumulates every source for each name (driving the
+	/// post-merge conflict report); the canonical maps keep the first
+	/// occurrence and drop later collisions.
+	fn merge_from(&mut self, other: MergeState) {
+		for (name, sources) in other.all_sources {
+			self.all_sources.entry(name).or_default().extend(sources);
+		}
+		for (name, spec) in other.targets {
+			if self.targets.contains_key(&name) {
+				continue;
+			}
+			if let Some(dir) = other.source_dirs.get(&name) {
+				self.source_dirs.insert(name.clone(), dir.clone());
+			}
+			if let Some(src) = other.target_sources.get(&name) {
+				self.target_sources.insert(name.clone(), src.clone());
+			}
+			self.targets.insert(name, spec);
 		}
 	}
 }
@@ -323,7 +354,19 @@ fn bake_globals_into_target(
 }
 
 /// Resolve includes from a parsed Runfile, merging included targets into the merge state.
-/// `visited` tracks canonicalized paths for cycle detection.
+///
+/// `visited` is treated as a *call-stack* set: each include's canonical path
+/// is inserted before recursion and removed after. This allows the same file
+/// to be loaded twice via sibling include paths (a "diamond"), which is a
+/// requirement for namespacing — e.g. including the same template under two
+/// different namespaces. Re-entry within a single chain still errors out as a
+/// cycle.
+///
+/// When an [`IncludeEntry`] carries a namespace, every target name, alias and
+/// `@target` reference contributed by that include's tree is prefixed with
+/// `<namespace>:`. Nesting composes from the innermost include outward, so a
+/// child's references that already resolve to its own namespaced targets stay
+/// internally consistent when an outer namespace is applied.
 pub(crate) fn resolve_includes(
 	runfile: &Runfile,
 	runfile_path: &Path,
@@ -341,8 +384,8 @@ pub(crate) fn resolve_includes(
 	// All includes must resolve to paths within this directory tree.
 	let canonical_base = std::fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
 
-	for include_path_str in &includes {
-		let include_path = base_dir.join(include_path_str);
+	for entry in &includes {
+		let include_path = base_dir.join(&entry.path);
 		let canonical =
 			std::fs::canonicalize(&include_path).map_err(|_| MergeError::IncludeNotFound(include_path.clone()))?;
 
@@ -355,30 +398,144 @@ pub(crate) fn resolve_includes(
 			return Err(MergeError::IncludePathTraversal(include_path));
 		}
 
+		// Validate namespace shape (if any) before doing any I/O work below.
+		if let Some(ns) = entry.namespace.as_deref() {
+			validate_namespace(ns).map_err(|reason| MergeError::InvalidIncludeNamespace {
+				path: include_path.clone(),
+				namespace: ns.to_string(),
+				reason,
+			})?;
+		}
+
+		// Cycle detection is per-chain, not per-load: insert before recursing,
+		// remove after, so a sibling that re-includes a previously-loaded file
+		// is not mistaken for a cycle.
 		if !visited.insert(canonical.clone()) {
 			return Err(MergeError::IncludeCycle(canonical.to_string_lossy().to_string()));
 		}
 
-		let included_runfile =
-			parse_runfile_from_path_partial(&canonical).map_err(|e| MergeError::IncludeParse(canonical.clone(), e))?;
+		let result = (|| -> Result<(), MergeError> {
+			let included_runfile = parse_runfile_from_path_partial(&canonical)
+				.map_err(|e| MergeError::IncludeParse(canonical.clone(), e))?;
 
-		let include_dir = canonical.parent().unwrap_or(Path::new(".")).to_path_buf();
+			let include_dir = canonical.parent().unwrap_or(Path::new(".")).to_path_buf();
 
-		// Recursively resolve nested includes first
-		resolve_includes(&included_runfile, &canonical, state, visited)?;
+			// Build a sub-state for this include's whole tree (its own targets
+			// + the result of resolving its own includes). Sub-includes get
+			// their own namespacing applied first; *this* include's namespace
+			// (if any) is then applied to the entire sub-state, so nesting
+			// composes from innermost outward.
+			let mut child_state = MergeState::new();
+			resolve_includes(&included_runfile, &canonical, &mut child_state, visited)?;
+			let globals_ref = included_runfile.globals.as_ref();
+			child_state.insert_targets(
+				included_runfile.targets,
+				globals_ref,
+				&include_path,
+				&include_dir,
+				SourceKind::Included,
+			);
 
-		// Merge included targets
-		let globals_ref = included_runfile.globals.as_ref();
-		state.insert_targets(
-			included_runfile.targets,
-			globals_ref,
-			&include_path,
-			&include_dir,
-			SourceKind::Included,
-		);
+			if let Some(ns) = entry.namespace.as_deref() {
+				apply_namespace_to_state(&mut child_state, ns);
+			}
+
+			state.merge_from(child_state);
+			Ok(())
+		})();
+
+		visited.remove(&canonical);
+		result?;
 	}
 
 	Ok(())
+}
+
+/// Validate an include `namespace` string.
+///
+/// Empty strings are normalised to `None` at deserialize time, so by the time
+/// this runs we have a non-empty value. Disallow characters that would break
+/// composition or collide with other syntax: leading `_` (would change
+/// internal-ness rules), leading `:` (collides with built-in subcommands),
+/// embedded `:` (composition is via nesting, not embedded colons), leading
+/// `@` (collides with target-call prefix), and any whitespace.
+fn validate_namespace(ns: &str) -> Result<(), String> {
+	if ns.is_empty() {
+		return Err("namespace must not be empty (omit the field or use \"\" to opt out)".into());
+	}
+	if ns.contains(char::is_whitespace) {
+		return Err("namespace must not contain whitespace".into());
+	}
+	if ns.contains(':') {
+		return Err("namespace must not contain ':' — compose hierarchies via nested includes instead".into());
+	}
+	let first = ns.chars().next().unwrap();
+	if first == '@' {
+		return Err("namespace must not start with '@' (reserved for `@target` invocations)".into());
+	}
+	if first == ':' {
+		return Err("namespace must not start with ':' (reserved for built-in CLI subcommands)".into());
+	}
+	if first == '_' {
+		return Err("namespace must not start with '_' (reserved for internal-target naming)".into());
+	}
+	Ok(())
+}
+
+/// Apply a namespace prefix to every target in `state`: rewrites canonical
+/// names, alias entries, all `@target` references inside command trees, and
+/// every auxiliary lookup map keyed by target name. Used by
+/// [`resolve_includes`] when the include carries a namespace.
+fn apply_namespace_to_state(state: &mut MergeState, namespace: &str) {
+	let prefix = |name: &str| format!("{namespace}:{name}");
+
+	// Rewrite targets (HashMap key changes) + aliases + @target refs.
+	let old_targets = std::mem::take(&mut state.targets);
+	for (name, mut spec) in old_targets {
+		if let Some(aliases) = spec.aliases.as_mut() {
+			for alias in aliases.iter_mut() {
+				*alias = prefix(alias);
+			}
+		}
+		rewrite_target_calls_in_steps(&mut spec.commands, namespace);
+		state.targets.insert(prefix(&name), spec);
+	}
+
+	state.source_dirs = std::mem::take(&mut state.source_dirs)
+		.into_iter()
+		.map(|(k, v)| (prefix(&k), v))
+		.collect();
+	state.target_sources = std::mem::take(&mut state.target_sources)
+		.into_iter()
+		.map(|(k, v)| (prefix(&k), v))
+		.collect();
+	state.all_sources = std::mem::take(&mut state.all_sources)
+		.into_iter()
+		.map(|(k, v)| (prefix(&k), v))
+		.collect();
+}
+
+/// Recursively rewrite every `@target` reference inside a command-step tree
+/// by prepending `<namespace>:` to its target name. Visits the same set of
+/// nodes as [`crate::CommandStep::walk_templates`], but mutates target names
+/// in `TargetCall` leaves rather than visiting templates.
+fn rewrite_target_calls_in_steps(steps: &mut [CommandStep], namespace: &str) {
+	for step in steps {
+		match step {
+			CommandStep::Shell(_) => {}
+			CommandStep::TargetCall(call) => {
+				call.target = format!("{namespace}:{}", call.target);
+			}
+			CommandStep::When(w) => rewrite_target_calls_in_steps(&mut w.commands, namespace),
+			CommandStep::If(i) => {
+				rewrite_target_calls_in_steps(&mut i.then, namespace);
+				if let Some(else_branch) = i.r#else.as_mut() {
+					rewrite_target_calls_in_steps(else_branch, namespace);
+				}
+			}
+			CommandStep::For(f) => rewrite_target_calls_in_steps(&mut f.body, namespace),
+		}
+	}
 }
 
 /// Convert a relative path to absolute based on a source directory.

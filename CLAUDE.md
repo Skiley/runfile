@@ -44,7 +44,8 @@ crates/
 **Files:** `schema.rs`, `discover.rs`, `parse.rs`, `merge.rs`, `dsl.rs`, `tests.rs`
 
 - Defines the Runfile schema as Rust types: `Runfile`, `CommandSpec`, `Globals`, `EnvValue`, `WhenStep`,
-  `WhenCondition`, `ExtendStdio`, `StdioStream`, `CommandStep`, `IfStep`, `ForStep`, `TargetCallStep`
+  `WhenCondition`, `ExtendStdio`, `StdioStream`, `CommandStep`, `IfStep`, `ForStep`, `TargetCallStep`,
+  `IncludeEntry`
 - Conditional configuration is expressed
   via `$(RUN.os)` / `$(RUN.shell)` substitution in scalar fields (env values, `forceShell`,
   `workingDirectory`, etc.) plus `if` / `when` / `@target` composition inside `commands`.
@@ -64,6 +65,18 @@ crates/
   keys), scalar fields (forceShell, logging, ignoreErrors, etc.) use target-if-set-else-global. After merging,
   `runfile.globals` is set to `None` — downstream code never sees globals. `merge_runfiles()` handles multi-file
   includes with target conflict resolution.
+- `merge.rs` (cont.): include entries (`IncludeEntry`) are either a plain path string or
+  `{ path, namespace? }`. When a namespace is set, `apply_namespace_to_state()` rewrites every target name and alias
+  in that include's sub-state, plus every `@target` reference inside its command tree (`rewrite_target_calls_in_steps`
+  walks `Shell`/`TargetCall`/`When`/`If`/`For` recursively). Rewrites are applied **innermost-first** so nested
+  includes compose: child includes `inner` as `inner`, parent includes child as `child` → child's `@inner:build` ends
+  up as `@child:inner:build`. `resolve_includes` builds a fresh `MergeState` per include, recurses into its own
+  sub-includes (which apply their own namespaces first), inserts the include's own targets, applies *this* level's
+  namespace, then folds the sub-state into the parent via `MergeState::merge_from`. Cycle detection in `resolve_includes`
+  uses `visited` as a per-call-stack set (insert before recursing, remove after) so sibling-loads of the same file
+  ("diamond" includes) work — and the same file can be included twice under different namespaces, yielding two
+  independent copies. Empty/absent `namespace` is normalised to `None` at `IncludeEntry` deserialize time and is
+  equivalent to the legacy string form. Namespace validation: non-empty, no `:` or whitespace, no leading `@`/`:`/`_`.
 - Control-flow blocks (`if` / `for` / `when`) and target calls (`@target`): each entry of a `commands` array is a
   [`CommandStep`] — either `Shell(String)` (raw command),
   `TargetCall(TargetCallStep)` (a string starting with `@`), `When(WhenStep)`, `If(IfStep)`, or `For(ForStep)`.
@@ -86,12 +99,14 @@ crates/
   substitution leaves (`$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)` / `$(LOOP.x)`), quoted strings, bare-words. Mixing
   `&&` and `||` in the same expression is a hard parse error — parens are required to disambiguate. Parsing happens
   eagerly during `validate_runfile`, so syntax errors surface at Runfile load time.
-- Internal targets: `is_internal_target_name(name)` (free function in `schema.rs`) returns true when a target's
-  canonical name starts with `_`. `Runfile::is_internal(name)` resolves any name (canonical or alias) to the
-  canonical name and applies the same check, so aliases on internal targets also report as internal.
-  `Runfile::public_target_names()` returns target names + aliases excluding internals; `all_target_names()` still
-  returns everything. Internal-ness is purely name-based — there is no schema field for it. Validation accepts
-  internal target names; only `:`-prefixed names are reserved.
+- Internal targets: `is_internal_target_name(name)` (free function in `schema.rs`) returns true when the **last**
+  `:`-separated segment of a target's canonical name starts with `_`. The "last segment" rule is what makes namespaced
+  internals (`api:_helper`) keep their internal status when an include applies a namespace.
+  `Runfile::is_internal(name)` resolves any name (canonical or alias) to the canonical name and applies the same
+  check, so aliases on internal targets also report as internal. `Runfile::public_target_names()` returns target
+  names + aliases excluding internals; `all_target_names()` still returns everything. Internal-ness is purely
+  name-based — there is no schema field for it. Validation accepts internal target names; only `:`-prefixed names
+  are reserved.
 
 ### runfile-shell
 
@@ -331,6 +346,15 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   (`"X": "value-$(RUN.os)"`) covers nearly all real cases without any new constructs.
 - **No `before` / `after` lifecycle.** Removed in favor of inline `@target` invocations and `WhenStep` blocks
   in `commands`.
+- **Include namespacing for monorepos.** `includes` accepts `IncludeEntry` values: either a path string (legacy
+  behavior — no rewrite, conflicts on duplicate target names) or `{ "path", "namespace"? }`. With a namespace, every
+  target name, alias, and `@target` reference inside that file is prefixed with `<namespace>:` at parse time. Children
+  are sealed: `@build` inside a namespaced include resolves to *that file's* `build`, never the parent's, because the
+  rewrite happens before merging. Nesting composes innermost-first (`outer:inner:build`). Same-file-twice with
+  different namespaces is allowed (independent copies). Empty/absent namespace = legacy behavior. Internal targets
+  preserve their `_`-prefix internal status under namespacing (`is_internal_target_name` checks the last `:`-segment).
+  Per-target source-dir tracking (`source_dirs` map keyed by post-rewrite name) ensures `runfileParent` and relative
+  `envFiles` paths resolve relative to the file that *defined* the target, not the merged root.
 - `WhenStep` (`{ when, commands, [ignoreErrors] }`): the wrapper form for guarded blocks. `IfStep` and `ForStep` also
   carry an optional top-level `when` field. Default is `WhenCondition::Success`. The walker's [`WalkState`] tracks a
   `failed: bool` flag — flipped when any `when: success` step exits non-zero (and isn't `ignoreErrors`'d). `failure` /
