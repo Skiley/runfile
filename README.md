@@ -29,6 +29,7 @@ $ run dev --port=4000
           "then": "wsl --shell-type login -- vite build"
         }
       ],
+      "envFiles": [".env", ".env.$(ARGS.env ? development)"]
       "parallel": true
     },
     "type-check": {
@@ -45,14 +46,21 @@ $ run dev --port=4000
 
 **1. Install:**
 
+npm:
+
 ```bash
-# npm
 npm install -g @skiley/runfile
+```
 
-# Linux / macOS
+Linux / macOS:
+
+```bash
 curl -fsSL https://github.com/Skiley/runfile/releases/latest/download/install.sh | sh
+```
 
-# Windows (PowerShell)
+Windows (via PowerShell):
+
+```bash
 iwr https://github.com/Skiley/runfile/releases/latest/download/install.ps1 | iex
 ```
 
@@ -60,24 +68,6 @@ iwr https://github.com/Skiley/runfile/releases/latest/download/install.ps1 | iex
 
 ```bash
 $ run :init
-```
-
-This drops a minimal Runfile you can edit:
-
-```jsonc
-{
-  "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
-  "targets": {
-    // Single-command targets can use a plain string instead of an array.
-    "build": { "commands": "cargo build --release" },
-    "test":  { "commands": "cargo test $(ARGS)" },
-    "dev":   {
-      "commands": ["npm run dev"],
-      "env": { "PORT": "$(ARGS.port ? 3000)" },
-      "watch": ["src/**/*"]
-    }
-  }
-}
 ```
 
 **3. List and run targets:**
@@ -92,7 +82,7 @@ $ run dev --port=4000
 **4. Add tab completion** (optional):
 
 ```bash
-$ run :completions install bash    # or zsh, fish, powershell
+$ run :completions install bash # or zsh, fish, powershell
 ```
 
 ---
@@ -176,7 +166,8 @@ $ run :env inject -f .env.production -- ./deploy.sh       # encrypted values aut
 
 #### Powerful argument substitution
 
-Positional, named, flags, env vars, and runtime context (`$(RUN.os)` / `$(RUN.shell)`) — with chained fallbacks and required values.
+Positional, named, flags, env vars, and runtime context (`$(RUN.os)` / `$(RUN.shell)`) — with chained fallbacks and
+required values.
 
 ```jsonc
 "PORT": "$(ARGS.port ? ENV.PORT ? 3000)",
