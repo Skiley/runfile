@@ -10,15 +10,11 @@
 	"targets": {
 		"build": {
 			"description": "Build all crates in debug mode using WSL",
-			"commands": [
-				"wsl --shell-type login -- cargo build $(ARGS) --target-dir target-linux"
-			]
+			"commands": "wsl --shell-type login -- cargo build $(ARGS) --target-dir target-linux"
 		},
 		"build:release": {
 			"description": "Build all crates in release mode using WSL",
-			"commands": [
-				"wsl --shell-type login -- cargo build --release $(ARGS) --target-dir target-linux"
-			]
+			"commands": "wsl --shell-type login -- cargo build --release $(ARGS) --target-dir target-linux"
 		},
 		"lint": {
 			"description": "Completely lints (type-checks, formats, runs Clippy) the project using WSL",
@@ -30,9 +26,7 @@
 		},
 		"test": {
 			"description": "Run all workspace tests using WSL",
-			"commands": [
-				"wsl --shell-type login -- cargo test $(ARGS) --target-dir target-linux"
-			]
+			"commands": "wsl --shell-type login -- cargo test $(ARGS) --target-dir target-linux"
 		}
 	}
 }

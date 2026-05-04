@@ -45,9 +45,7 @@
 						"-mac",
 						"-windows"
 					],
-					"do": [
-						"cargo clean --target-dir target$(LOOP.dir)"
-					]
+					"do": "cargo clean --target-dir target$(LOOP.dir)"
 				}
 			]
 		},
