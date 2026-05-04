@@ -1,11 +1,23 @@
-use runfile_parser::{
-	parse_runfile_from_path, CommandSpec, CommandStep, Globals, IfStep, Runfile, RUNFILE_NAME, WORKING_DIRECTORY_CWD,
-};
-use std::collections::HashMap;
+use runfile_parser::{parse_runfile_from_path, RUNFILE_NAME, WORKING_DIRECTORY_CWD};
 use std::path::PathBuf;
 use std::process;
 
-use crate::runfile_helpers::{load_or_create_runfile, resolve_runfile_path, write_runfile, write_runfile_to_path};
+use crate::runfile_helpers::{load_or_create_runfile, resolve_runfile_path, write_runfile};
+
+/// Minimal starter Runfile written by `:init`. A single `hello` target
+/// running `echo Hello World` — works identically on every supported shell
+/// (bash/zsh/sh/fish/powershell/cmd) and demonstrates the bare-string
+/// `commands` sugar so users see the cleanest form by default.
+const INIT_TEMPLATE: &str = r#"{
+	"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+	"targets": {
+		"hello": {
+			"description": "Say Hello World",
+			"commands": "echo Hello World"
+		}
+	}
+}
+"#;
 
 pub fn cmd_init(path: Option<PathBuf>) {
 	let output_path = path.unwrap_or_else(|| PathBuf::from(RUNFILE_NAME));
@@ -15,46 +27,10 @@ pub fn cmd_init(path: Option<PathBuf>) {
 		process::exit(1);
 	}
 
-	// Generate a per-shell hello world using `if "$(RUN.shell) == ..."`
-	// dispatching. Default branch covers POSIX shells; Windows shells get
-	// their idiomatic hello.
-	let if_powershell = IfStep {
-		condition: "$(RUN.shell) == powershell".to_string(),
-		then: vec![CommandStep::Shell("Write-Host 'Hello World'".to_string())],
-		r#else: Some(vec![CommandStep::If(IfStep {
-			condition: "$(RUN.shell) == cmd".to_string(),
-			then: vec![CommandStep::Shell("echo Hello World".to_string())],
-			r#else: Some(vec![CommandStep::If(IfStep {
-				condition: "$(RUN.shell) == fish".to_string(),
-				then: vec![CommandStep::Shell("echo 'Hello World'".to_string())],
-				r#else: Some(vec![CommandStep::Shell("echo \"Hello World\"".to_string())]),
-				ignore_errors: None,
-				when: None,
-				condition_ast: None,
-			})]),
-			ignore_errors: None,
-			when: None,
-			condition_ast: None,
-		})]),
-		ignore_errors: None,
-		when: None,
-		condition_ast: None,
-	};
-	let mut hello_spec = CommandSpec::new(vec![CommandStep::If(if_powershell)]);
-	hello_spec.description = Some("Say Hello World".to_string());
-
-	let mut targets = HashMap::new();
-	targets.insert("hello".to_string(), hello_spec);
-
-	let runfile = Runfile {
-		schema: "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json".to_string(),
-		includes: None,
-		targets,
-		globals: Some(Globals::default()),
-		namespaces: Vec::new(),
-	};
-
-	write_runfile_to_path(&runfile, &output_path);
+	if let Err(e) = std::fs::write(&output_path, INIT_TEMPLATE) {
+		eprintln!("Error writing {}: {e}", output_path.display());
+		process::exit(1);
+	}
 	println!("Created {}", output_path.display());
 }
 
@@ -434,5 +410,19 @@ pub fn cmd_generate_jetbrains_run_configs(file: Option<&std::path::Path>, output
 		for (file_name, reason) in &skipped {
 			eprintln!("    {file_name}: {reason}");
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::INIT_TEMPLATE;
+
+	#[test]
+	fn init_template_parses_as_runfile() {
+		// The template is a literal string, so the type system can't catch
+		// typos. Round-trip it through the parser to make sure `:init`
+		// always produces a file the rest of the toolchain accepts.
+		let runfile = runfile_parser::parse_runfile(INIT_TEMPLATE).expect("init template must parse");
+		assert!(runfile.targets.contains_key("hello"));
 	}
 }
