@@ -3,7 +3,9 @@ use crate::control_flow::{count_leaves, evaluate_if_condition, expand_for_iterat
 use crate::env::{build_env_with_base, EnvFileError};
 use crate::force_kill::ForceKillGuard;
 use crate::logging::{is_logging_enabled, log_command, log_command_timing, log_parallel_command, StepCounter};
-use crate::parallel_output::{format_parallel_prefix, line_prefixing_enabled, spawn_line_pump, OutputStream};
+use crate::parallel_output::{
+	flush_writer_thread, format_parallel_prefix, line_prefixing_enabled, spawn_line_pump, OutputStream,
+};
 use crate::stdio_tailer::StdioTailerSet;
 use runfile_parser::{CommandSpec, CommandStep, ExtendStdio, ForStep, IfStep, TargetCallStep, WhenCondition, WhenStep};
 use runfile_shell::ResolvedShell;
@@ -595,6 +597,10 @@ fn execute_one_shell(
 		for h in handles {
 			let _ = h.join();
 		}
+		// All pump threads have finished forwarding bytes to the global
+		// writer thread; drain the writer's queue so this command's output
+		// is fully visible before we return.
+		flush_writer_thread();
 		s
 	} else if let Some(guard) = force_kill_guard {
 		// Inherit stdio + track the child for force-kill on Ctrl+C.
@@ -1179,6 +1185,7 @@ fn run_sequential_leaves(
 					for h in handles {
 						let _ = h.join();
 					}
+					flush_writer_thread();
 					s
 				} else if let Some(guard) = force_kill_guard {
 					let mut child = cmd.spawn()?;
@@ -1403,11 +1410,17 @@ fn run_parallel_batch(
 		}
 		// The child's pipe ends close on exit, so reader threads see EOF and
 		// terminate. Joining ensures all buffered output has been flushed
-		// before we move on to the failure / always partitions or return.
+		// to the global writer thread before we move on.
 		for h in pump_handles {
 			let _ = h.join();
 		}
 	}
+
+	// All pump threads have queued their final bytes; block until the
+	// global writer thread has actually written them out so this batch's
+	// output is fully visible before we proceed to failure/always partitions
+	// or return.
+	flush_writer_thread();
 
 	for result in dep_results {
 		match result {

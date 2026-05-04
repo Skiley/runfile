@@ -4,18 +4,36 @@
 //! their output interleaves character-by-character — and tools that emit
 //! cursor-control escapes (progress bars, in-place line redraws via `\r` or
 //! `\x1b[A` / `\x1b[K`) corrupt each other's output. This module pipes each
-//! child's stdout/stderr through reader threads that:
+//! child's stdout/stderr through reader threads (one per stream per child)
+//! that:
 //!
-//! 1. Split the byte stream on `\n` and `\r` (so dynamic redraws become
+//! 1. Split the byte stream on `\n`, `\r`, and ANSI cursor-positioning /
+//!    erase escapes (so dynamic redraws and TTY-mode "frame" updates become
 //!    chronological append-only lines, à la `concurrently` / `npm-run-all`
 //!    / `pnpm run --recursive`).
 //! 2. Strip non-SGR ANSI escapes (cursor movement, erase-line, OSC) while
 //!    preserving SGR color/style codes.
-//! 3. Write each completed line prefixed with a per-leaf tag (e.g. `[3] `)
-//!    via the standard stdout/stderr lock so prefix+content+newline lands as
-//!    one atomic write.
+//! 3. Trim layout-padding whitespace from each line (Docker Compose's
+//!    progress UI etc. leaves behind alignment spaces once cursor escapes
+//!    are stripped).
+//! 4. Send each completed prefixed line to a single dedicated writer thread
+//!    via an MPSC channel. The writer thread is the only thread that ever
+//!    touches the real stdout/stderr — guaranteeing no two lines from
+//!    different pumps can interleave at the byte level. Per-write
+//!    `std::io::stdout().lock()` mutex turns out to be insufficient on
+//!    Windows console output: WriteConsoleW exhibits non-atomicity for
+//!    concurrent multi-threaded writes (manifesting as mid-line
+//!    character-level interleaving — e.g. one pump's `\r\n` showing up
+//!    inside another pump's content, rendered by the terminal as CP437
+//!    glyphs `♪◙` because the bytes ended up mid-stream).
+//!
+//! Lines end with `\r\n` on Windows (avoids "growing-indent staircase" when
+//! VT processing is enabled and treats bare `\n` as a strict line-feed
+//! without carriage return) and `\n` on Unix.
 
 use std::io::{Read, Write};
+use std::sync::mpsc::{self, Sender};
+use std::sync::OnceLock;
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -151,23 +169,97 @@ fn emit_segment(prefix: &str, segment: &[u8], stream: &OutputStream) {
 	out.extend_from_slice(prefix.as_bytes());
 	out.extend_from_slice(body);
 	out.extend_from_slice(line_ending);
+	dispatch_emit(stream, out);
+}
+
+/// A single line ready to be written to its target stream. Sent over the
+/// MPSC channel from any number of pump threads to the dedicated writer
+/// thread, which drains the channel and writes one message at a time —
+/// guaranteeing that no two lines from different pumps can interleave at
+/// the byte level. This is critical on Windows console output, where the
+/// per-write `std::io::stdout().lock()` mutex turns out to be insufficient
+/// in practice: WriteConsoleW and the Windows console driver have observed
+/// non-atomicity for concurrent multi-threaded writes (manifesting as
+/// mid-line character-level interleaving — e.g. one pump's `\r\n` showing
+/// up inside another pump's content, rendered as CP437 glyphs `♪◙`).
+enum OutputMessage {
+	Line { stream: OutputStream, bytes: Vec<u8> },
+	Flush(mpsc::Sender<()>),
+}
+
+fn dispatch_emit(stream: &OutputStream, bytes: Vec<u8>) {
+	#[cfg(test)]
+	if let OutputStream::Capture(buf) = stream {
+		// Capture sinks bypass the writer thread entirely so unit tests can
+		// run synchronously and don't have to flush through the global
+		// channel. Acquiring the buffer's mutex serializes test writes.
+		let mut g = buf.lock().unwrap();
+		g.extend_from_slice(&bytes);
+		return;
+	}
+	let _ = writer_sender().send(OutputMessage::Line {
+		stream: stream.clone(),
+		bytes,
+	});
+}
+
+/// Block until the writer thread has drained every queued message up to
+/// this call. Used by pump threads after they finish reading their stream,
+/// so the parent's wait loop sees all output before reporting the child
+/// done.
+pub(crate) fn flush_writer_thread() {
+	let (tx, rx) = mpsc::channel();
+	if writer_sender().send(OutputMessage::Flush(tx)).is_ok() {
+		let _ = rx.recv();
+	}
+}
+
+/// One-time-initialized handle to the global writer thread's input channel.
+/// The first call spawns the writer thread; all subsequent calls return the
+/// same `Sender`. The thread runs for the lifetime of the process — it
+/// never terminates because there's no clean shutdown signal that wouldn't
+/// race with late-arriving pump output.
+fn writer_sender() -> &'static Sender<OutputMessage> {
+	static SENDER: OnceLock<Sender<OutputMessage>> = OnceLock::new();
+	SENDER.get_or_init(|| {
+		let (tx, rx) = mpsc::channel::<OutputMessage>();
+		thread::Builder::new()
+			.name("runfile-output-writer".to_string())
+			.spawn(move || {
+				while let Ok(msg) = rx.recv() {
+					match msg {
+						OutputMessage::Line { stream, bytes } => {
+							write_to_stream(&stream, &bytes);
+						}
+						OutputMessage::Flush(ack) => {
+							let _ = ack.send(());
+						}
+					}
+				}
+			})
+			.expect("spawn output writer thread");
+		tx
+	})
+}
+
+fn write_to_stream(stream: &OutputStream, bytes: &[u8]) {
 	match stream {
 		OutputStream::Stdout => {
 			let stdout = std::io::stdout();
 			let mut h = stdout.lock();
-			let _ = h.write_all(&out);
+			let _ = h.write_all(bytes);
 			let _ = h.flush();
 		}
 		OutputStream::Stderr => {
 			let stderr = std::io::stderr();
 			let mut h = stderr.lock();
-			let _ = h.write_all(&out);
+			let _ = h.write_all(bytes);
 			let _ = h.flush();
 		}
 		#[cfg(test)]
 		OutputStream::Capture(buf) => {
 			let mut g = buf.lock().unwrap();
-			g.extend_from_slice(&out);
+			g.extend_from_slice(bytes);
 		}
 	}
 }
