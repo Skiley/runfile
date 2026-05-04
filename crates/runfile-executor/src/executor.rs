@@ -3,12 +3,14 @@ use crate::control_flow::{count_leaves, evaluate_if_condition, expand_for_iterat
 use crate::env::{build_env_with_base, EnvFileError};
 use crate::force_kill::ForceKillGuard;
 use crate::logging::{is_logging_enabled, log_command, log_command_timing, log_parallel_command, StepCounter};
+use crate::parallel_output::{format_parallel_prefix, line_prefixing_enabled, spawn_line_pump, OutputStream};
 use crate::stdio_tailer::StdioTailerSet;
 use runfile_parser::{CommandSpec, CommandStep, ExtendStdio, ForStep, IfStep, TargetCallStep, WhenCondition, WhenStep};
 use runfile_shell::ResolvedShell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread::JoinHandle;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -56,6 +58,12 @@ pub trait DependencyResolver: Sync {
 	/// - `optional`: when true, a missing target is silently skipped (returns
 	///   `Ok(empty result)`) rather than producing an `UnknownTarget` error.
 	///   Set by `@?target` invocations.
+	/// - `output_prefix`: when `Some`, every shell command spawned during the
+	///   dep's execution (including transitively through nested `@target`
+	///   invocations) is piped + prefixed with this string. Set by parallel
+	///   parents so each branch of the parallel fan-out gets a distinct tag
+	///   (e.g. `[3] `) and progress-bar redraws / interleaved output stay
+	///   readable. `None` for top-level invocations.
 	fn run_dependency(
 		&self,
 		target_name: &str,
@@ -63,6 +71,7 @@ pub trait DependencyResolver: Sync {
 		parent_env: &HashMap<String, String>,
 		parent_add_to_path_chain: &[Vec<String>],
 		optional: bool,
+		output_prefix: Option<&str>,
 	) -> Result<ExecutionResult, ExecuteError>;
 }
 
@@ -80,6 +89,7 @@ impl DependencyResolver for NoOpDependencyResolver {
 		_parent_env: &HashMap<String, String>,
 		_parent_add_to_path_chain: &[Vec<String>],
 		_optional: bool,
+		_output_prefix: Option<&str>,
 	) -> Result<ExecutionResult, ExecuteError> {
 		Err(ExecuteError::DependencyFailed(
 			target_name.to_string(),
@@ -109,6 +119,13 @@ struct ExecSetup {
 	logging: bool,
 	ignore_errors: bool,
 	force_kill: bool,
+	/// Output prefix inherited from a parallel ancestor. When set, every
+	/// shell command in this target spawns with `Stdio::piped()` and routes
+	/// its output through the line-prefix muxer using this prefix. Forwarded
+	/// verbatim to nested `@target` calls so the partition identity propagates
+	/// down the entire dependency tree. `None` at top-level / when no parallel
+	/// ancestor has set one.
+	output_prefix: Option<String>,
 }
 
 impl ExecSetup {
@@ -119,6 +136,7 @@ impl ExecSetup {
 		available_private_keys: Option<&[String]>,
 		parent_env: Option<&HashMap<String, String>>,
 		parent_add_to_path_chain: &[Vec<String>],
+		output_prefix: Option<&str>,
 	) -> Result<(Self, Option<StdioTailerSet>, Option<ForceKillGuard>), ExecuteError> {
 		let env = build_env_with_base(
 			spec,
@@ -145,6 +163,7 @@ impl ExecSetup {
 			force_kill: spec.force_kill_on_sig_int.unwrap_or(false),
 			env,
 			add_to_path_chain,
+			output_prefix: output_prefix.map(String::from),
 		};
 
 		let tailer = if let Some(entries) = spec.extend_stdio.as_ref().filter(|e| !e.is_empty()) {
@@ -213,6 +232,7 @@ pub fn execute_command(
 		&NoOpDependencyResolver,
 		None,
 		&[],
+		None,
 	)
 }
 
@@ -235,6 +255,7 @@ pub fn execute_command_with_counter(
 	deps: &dyn DependencyResolver,
 	parent_env: Option<&HashMap<String, String>>,
 	parent_add_to_path_chain: &[Vec<String>],
+	output_prefix: Option<&str>,
 ) -> Result<ExecutionResult, ExecuteError> {
 	let (setup, tailer, force_kill_guard) = ExecSetup::new(
 		spec,
@@ -243,6 +264,7 @@ pub fn execute_command_with_counter(
 		available_private_keys,
 		parent_env,
 		parent_add_to_path_chain,
+		output_prefix,
 	)?;
 	let mut state = WalkState {
 		commands_run: 0,
@@ -482,7 +504,14 @@ fn execute_one_target_call(
 	// dispatch to the correct namespaced target. No-op for static names.
 	let target = args.substitute_with_loop(&call.target, &setup.env, loop_scope)?;
 	let argv = resolve_target_call_argv(call, args, &setup.env, loop_scope)?;
-	let result = deps.run_dependency(&target, argv, &setup.env, &setup.add_to_path_chain, call.optional)?;
+	let result = deps.run_dependency(
+		&target,
+		argv,
+		&setup.env,
+		&setup.add_to_path_chain,
+		call.optional,
+		setup.output_prefix.as_deref(),
+	)?;
 	state.commands_run += result.commands_run;
 	state.failures += result.failures;
 	state.last_status = Some(result.final_status).or(state.last_status);
@@ -543,20 +572,38 @@ fn execute_one_shell(
 	let shell_args = shell.exec_args(&cmd_str);
 
 	let cmd_start = Instant::now();
-	let status = if let Some(guard) = force_kill_guard {
-		let mut child = Command::new(&shell.path)
-			.args(&shell_args)
-			.envs(&setup.env)
-			.current_dir(working_dir)
-			.spawn()?;
+	let mut cmd = Command::new(&shell.path);
+	cmd.args(&shell_args).envs(&setup.env).current_dir(working_dir);
+
+	let status = if let Some(prefix) = setup.output_prefix.as_deref() {
+		// Inherited from a parallel ancestor: pipe stdout/stderr and route
+		// through line-prefixed pumps so this dep's output stays tagged with
+		// the parent's branch identity (e.g. `[3] `).
+		cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+		let mut child = cmd.spawn()?;
+		if let Some(guard) = force_kill_guard {
+			guard.add_child(&child);
+		}
+		let mut handles = Vec::new();
+		if let Some(out) = child.stdout.take() {
+			handles.push(spawn_line_pump(out, prefix.to_string(), OutputStream::Stdout));
+		}
+		if let Some(err) = child.stderr.take() {
+			handles.push(spawn_line_pump(err, prefix.to_string(), OutputStream::Stderr));
+		}
+		let s = child.wait()?;
+		for h in handles {
+			let _ = h.join();
+		}
+		s
+	} else if let Some(guard) = force_kill_guard {
+		// Inherit stdio + track the child for force-kill on Ctrl+C.
+		let mut child = cmd.spawn()?;
 		guard.add_child(&child);
 		child.wait()?
 	} else {
-		Command::new(&shell.path)
-			.args(&shell_args)
-			.envs(&setup.env)
-			.current_dir(working_dir)
-			.status()?
+		// Fast path: inherit stdio.
+		cmd.status()?
 	};
 
 	if timings {
@@ -565,12 +612,7 @@ fn execute_one_shell(
 
 	state.commands_run += 1;
 	state.last_status = Some(status);
-
 	if !status.success() {
-		// Always count the failure so the outer walker can flip the target
-		// state. We never abort the walk here — the walker continues so
-		// `when: failure`/`always` blocks still get a chance to run. With
-		// target-level `ignoreErrors`, even the final exit code stays 0.
 		state.failures += 1;
 	}
 	Ok(())
@@ -1100,8 +1142,16 @@ fn run_sequential_leaves(
 	deps: &dyn DependencyResolver,
 	state: &mut WalkState,
 ) -> Result<(), ExecuteError> {
+	let prefix_output = line_prefixing_enabled();
 	for leaf in leaves {
 		let (step, total) = counter.next_step();
+		// In a prefixed parent context, inherit the parent's prefix so
+		// output stays tagged. Otherwise no prefix (sequential fallback).
+		let leaf_prefix: Option<String> = if !prefix_output {
+			None
+		} else {
+			setup.output_prefix.clone()
+		};
 		match leaf {
 			ParallelLeaf::Shell {
 				template, substituted, ..
@@ -1110,20 +1160,32 @@ fn run_sequential_leaves(
 					log_command(&template, step, total);
 				}
 				let shell_args = shell.exec_args(&substituted);
-				let status = if let Some(guard) = force_kill_guard {
-					let mut child = Command::new(&shell.path)
-						.args(&shell_args)
-						.envs(&setup.env)
-						.current_dir(working_dir)
-						.spawn()?;
+				let mut cmd = Command::new(&shell.path);
+				cmd.args(&shell_args).envs(&setup.env).current_dir(working_dir);
+				let status = if let Some(prefix) = leaf_prefix.as_deref() {
+					cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+					let mut child = cmd.spawn()?;
+					if let Some(guard) = force_kill_guard {
+						guard.add_child(&child);
+					}
+					let mut handles = Vec::new();
+					if let Some(out) = child.stdout.take() {
+						handles.push(spawn_line_pump(out, prefix.to_string(), OutputStream::Stdout));
+					}
+					if let Some(err) = child.stderr.take() {
+						handles.push(spawn_line_pump(err, prefix.to_string(), OutputStream::Stderr));
+					}
+					let s = child.wait()?;
+					for h in handles {
+						let _ = h.join();
+					}
+					s
+				} else if let Some(guard) = force_kill_guard {
+					let mut child = cmd.spawn()?;
 					guard.add_child(&child);
 					child.wait()?
 				} else {
-					Command::new(&shell.path)
-						.args(&shell_args)
-						.envs(&setup.env)
-						.current_dir(working_dir)
-						.status()?
+					cmd.status()?
 				};
 				state.commands_run += 1;
 				state.last_status = Some(status);
@@ -1135,15 +1197,22 @@ fn run_sequential_leaves(
 				target, argv, optional, ..
 			} => {
 				if setup.logging {
-					let prefix = if optional { "@?" } else { "@" };
+					let prefix_marker = if optional { "@?" } else { "@" };
 					let label = if argv.is_empty() {
-						format!("{}{}", prefix, target)
+						format!("{}{}", prefix_marker, target)
 					} else {
-						format!("{}{} {}", prefix, target, argv.join(" "))
+						format!("{}{} {}", prefix_marker, target, argv.join(" "))
 					};
 					log_command(&label, step, total);
 				}
-				let result = deps.run_dependency(&target, argv, &setup.env, &setup.add_to_path_chain, optional)?;
+				let result = deps.run_dependency(
+					&target,
+					argv,
+					&setup.env,
+					&setup.add_to_path_chain,
+					optional,
+					leaf_prefix.as_deref(),
+				)?;
 				state.commands_run += result.commands_run;
 				state.failures += result.failures;
 				state.last_status = Some(result.final_status).or(state.last_status);
@@ -1197,33 +1266,49 @@ fn run_parallel_batch(
 	}
 
 	// Split leaves into shells (spawned as processes) and target calls (run
-	// on worker threads).
-	let mut shells: Vec<(String, String)> = Vec::new();
-	let mut target_calls: Vec<(String, Vec<String>, bool)> = Vec::new();
-	for leaf in leaves {
+	// on worker threads). Each leaf carries the prefix that should tag its
+	// output. When this batch was reached via an ancestor that already set a
+	// prefix, every leaf inherits it verbatim (preserving the outer partition
+	// identity); otherwise each leaf gets a per-step prefix `[N]` matching
+	// the upfront `(N/total)` log line.
+	let prefix_output = line_prefixing_enabled();
+	let mut shells: Vec<(String, String, Option<String>)> = Vec::new();
+	let mut target_calls: Vec<(String, Vec<String>, bool, Option<String>)> = Vec::new();
+	for (leaf, &(step, _total)) in leaves.into_iter().zip(step_pairs.iter()) {
+		let leaf_prefix = if !prefix_output {
+			None
+		} else if let Some(parent) = setup.output_prefix.as_deref() {
+			Some(parent.to_string())
+		} else {
+			Some(format_parallel_prefix(step))
+		};
 		match leaf {
 			ParallelLeaf::Shell {
 				template, substituted, ..
-			} => shells.push((template, substituted)),
+			} => shells.push((template, substituted, leaf_prefix)),
 			ParallelLeaf::TargetCall {
 				target, argv, optional, ..
-			} => target_calls.push((target, argv, optional)),
+			} => target_calls.push((target, argv, optional, leaf_prefix)),
 		}
 	}
 
 	#[allow(unused_mut)]
 	let mut tree_tracker = ProcessTreeTracker::new();
 
-	let mut children: Vec<(String, Child)> = Vec::with_capacity(shells.len());
-	for (template, substituted) in &shells {
+	let mut children: Vec<(String, Child, Vec<JoinHandle<()>>)> = Vec::with_capacity(shells.len());
+	for (template, substituted, leaf_prefix) in &shells {
 		let shell_args = shell.exec_args(substituted);
 		let mut cmd = Command::new(&shell.path);
 		cmd.args(&shell_args).envs(&setup.env).current_dir(working_dir);
 
+		if leaf_prefix.is_some() {
+			cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+		}
+
 		#[cfg(unix)]
 		tree_tracker.prepare_command(&mut cmd);
 
-		let child = cmd.spawn()?;
+		let mut child = cmd.spawn()?;
 
 		#[cfg(windows)]
 		tree_tracker.add_child(&child);
@@ -1232,7 +1317,17 @@ fn run_parallel_batch(
 			guard.add_child(&child);
 		}
 
-		children.push((template.clone(), child));
+		let mut pump_handles: Vec<JoinHandle<()>> = Vec::new();
+		if let Some(prefix) = leaf_prefix {
+			if let Some(out) = child.stdout.take() {
+				pump_handles.push(spawn_line_pump(out, prefix.clone(), OutputStream::Stdout));
+			}
+			if let Some(err) = child.stderr.take() {
+				pump_handles.push(spawn_line_pump(err, prefix.clone(), OutputStream::Stderr));
+			}
+		}
+
+		children.push((template.clone(), child, pump_handles));
 	}
 
 	#[cfg(unix)]
@@ -1254,11 +1349,22 @@ fn run_parallel_batch(
 
 	// Run target calls on worker threads while children processes run
 	// concurrently. `thread::scope` lets the threads borrow `deps`,
-	// `parent_env`, and `parent_chain` without requiring `'static`.
+	// `parent_env`, and `parent_chain` without requiring `'static`. Each
+	// worker forwards its leaf's `output_prefix` so the dispatched dep's
+	// transitive shells get tagged with the partition identity (e.g. `[3] `).
 	let dep_results: Vec<Result<ExecutionResult, ExecuteError>> = std::thread::scope(|scope| {
 		let mut handles = Vec::with_capacity(target_calls.len());
-		for (target, argv, optional) in target_calls {
-			handles.push(scope.spawn(move || deps.run_dependency(&target, argv, parent_env, parent_chain, optional)));
+		for (target, argv, optional, leaf_prefix) in target_calls {
+			handles.push(scope.spawn(move || {
+				deps.run_dependency(
+					&target,
+					argv,
+					parent_env,
+					parent_chain,
+					optional,
+					leaf_prefix.as_deref(),
+				)
+			}));
 		}
 		handles
 			.into_iter()
@@ -1272,7 +1378,7 @@ fn run_parallel_batch(
 			.collect()
 	});
 
-	for (template, mut child) in children {
+	for (template, mut child, pump_handles) in children {
 		match child.wait() {
 			Ok(status) => {
 				last_status = Some(status);
@@ -1294,6 +1400,12 @@ fn run_parallel_batch(
 					wait_error = Some(e);
 				}
 			}
+		}
+		// The child's pipe ends close on exit, so reader threads see EOF and
+		// terminate. Joining ensures all buffered output has been flushed
+		// before we move on to the failure / always partitions or return.
+		for h in pump_handles {
+			let _ = h.join();
 		}
 	}
 
@@ -1387,6 +1499,7 @@ pub fn execute_parallel(
 		&NoOpDependencyResolver,
 		None,
 		&[],
+		None,
 	)
 }
 
@@ -1404,6 +1517,7 @@ pub fn execute_parallel_with_counter(
 	deps: &dyn DependencyResolver,
 	parent_env: Option<&HashMap<String, String>>,
 	parent_add_to_path_chain: &[Vec<String>],
+	output_prefix: Option<&str>,
 ) -> Result<ExecutionResult, ExecuteError> {
 	let (setup, tailer, force_kill_guard) = ExecSetup::new(
 		spec,
@@ -1412,6 +1526,7 @@ pub fn execute_parallel_with_counter(
 		available_private_keys,
 		parent_env,
 		parent_add_to_path_chain,
+		output_prefix,
 	)?;
 
 	// Expand if/for blocks to a flat list of leaves (shell or @target).

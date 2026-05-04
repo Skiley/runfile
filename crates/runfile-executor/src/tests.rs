@@ -1,7 +1,7 @@
 use crate::args::{check_env_case_duplicates, scan_args_usage, validate_args, RunArgs, RunContext, SubstitutionError};
 use crate::env::{build_env, load_env_files, parse_env_file};
 use crate::executor::{execute_command, execute_parallel};
-use runfile_parser::{CommandSpec, EnvValue};
+use runfile_parser::{CommandSpec, CommandStep, EnvValue};
 use runfile_shell::{detect_default_shell, ResolvedShell, ShellKind};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -5159,4 +5159,331 @@ fn loop_scope_innermost_wins() {
 	assert_eq!(scope.get("x"), Some("outer"));
 	scope.pop();
 	assert_eq!(scope.get("x"), None);
+}
+
+// ──── output-prefix propagation tests ─────────────────────────────────
+//
+// These verify that `parallel: true` parents tag every shell command in
+// their dispatched dependency subtree with a per-leaf prefix (the global
+// step number, e.g. `[3] `). The mechanism is `output_prefix`: it flows
+// from `run_parallel_batch` → `DependencyResolver::run_dependency` →
+// `run_target_inner` → `ExecSetup.output_prefix` → every nested
+// `execute_one_shell` / `run_parallel_batch`. We use a recording resolver
+// here so we can assert exactly what prefix each `@target` invocation
+// receives — verifying the propagation contract end-to-end without having
+// to capture stdout from a real shell child.
+
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingResolver {
+	calls: Mutex<Vec<RecordedCall>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedCall {
+	target: String,
+	output_prefix: Option<String>,
+}
+
+impl crate::executor::DependencyResolver for RecordingResolver {
+	fn run_dependency(
+		&self,
+		target_name: &str,
+		_args: Vec<String>,
+		_parent_env: &HashMap<String, String>,
+		_parent_add_to_path_chain: &[Vec<String>],
+		_optional: bool,
+		output_prefix: Option<&str>,
+	) -> Result<crate::executor::ExecutionResult, crate::executor::ExecuteError> {
+		self.calls.lock().unwrap().push(RecordedCall {
+			target: target_name.to_string(),
+			output_prefix: output_prefix.map(String::from),
+		});
+		Ok(crate::executor::ExecutionResult {
+			commands_run: 0,
+			failures: 0,
+			final_status: dummy_success_status(),
+		})
+	}
+}
+
+fn dummy_success_status() -> std::process::ExitStatus {
+	#[cfg(unix)]
+	{
+		use std::os::unix::process::ExitStatusExt;
+		std::process::ExitStatus::from_raw(0)
+	}
+	#[cfg(windows)]
+	{
+		use std::os::windows::process::ExitStatusExt;
+		std::process::ExitStatus::from_raw(0)
+	}
+}
+
+#[test]
+fn parallel_target_calls_receive_per_leaf_output_prefix() {
+	// A parallel target with three `@dep` leaves and no inherited prefix
+	// must hand each leaf a distinct per-step prefix derived from the
+	// global step counter (`[1]`, `[2]`, `[3]`).
+	use crate::executor::execute_parallel_with_counter;
+	use crate::logging::StepCounter;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let mut spec = CommandSpec::new(vec![
+		CommandStep::TargetCall(runfile_parser::TargetCallStep {
+			target: "one".into(),
+			args_template: String::new(),
+			optional: false,
+		}),
+		CommandStep::TargetCall(runfile_parser::TargetCallStep {
+			target: "two".into(),
+			args_template: String::new(),
+			optional: false,
+		}),
+		CommandStep::TargetCall(runfile_parser::TargetCallStep {
+			target: "three".into(),
+			args_template: String::new(),
+			optional: false,
+		}),
+	]);
+	spec.parallel = Some(true);
+
+	let args = RunArgs::default();
+	let counter = StepCounter::new(3);
+	let resolver = RecordingResolver::default();
+
+	execute_parallel_with_counter(
+		&spec,
+		&shell,
+		&args,
+		dir.path(),
+		None,
+		false,
+		&counter,
+		&resolver,
+		None,
+		&[],
+		None, // no inherited prefix → per-leaf step prefixes
+	)
+	.unwrap();
+
+	let mut calls = resolver.calls.lock().unwrap().clone();
+	calls.sort_by(|a, b| a.target.cmp(&b.target));
+
+	// Each leaf must have received SOME prefix (a Some), and the three
+	// prefixes must be distinct (per-leaf step numbering, not all empty
+	// or all equal).
+	assert_eq!(calls.len(), 3);
+	for c in &calls {
+		assert!(c.output_prefix.is_some(), "{} got no prefix", c.target);
+	}
+	let prefixes: std::collections::HashSet<_> = calls.iter().map(|c| c.output_prefix.clone().unwrap()).collect();
+	assert_eq!(
+		prefixes.len(),
+		3,
+		"per-leaf prefixes must be distinct, got {:?}",
+		prefixes
+	);
+	// Each prefix must contain a `[N]` step token.
+	for c in &calls {
+		let p = c.output_prefix.as_deref().unwrap();
+		assert!(
+			p.contains('[') && p.contains(']'),
+			"prefix should contain [N], got {:?}",
+			p
+		);
+	}
+}
+
+#[test]
+fn inherited_output_prefix_overrides_per_leaf_in_nested_parallel() {
+	// When a parallel batch is reached via a parent that already set a
+	// prefix, every leaf must inherit that prefix verbatim (preserving
+	// the outer partition identity) — no per-leaf step renumbering.
+	use crate::executor::execute_parallel_with_counter;
+	use crate::logging::StepCounter;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let mut spec = CommandSpec::new(vec![
+		CommandStep::TargetCall(runfile_parser::TargetCallStep {
+			target: "a".into(),
+			args_template: String::new(),
+			optional: false,
+		}),
+		CommandStep::TargetCall(runfile_parser::TargetCallStep {
+			target: "b".into(),
+			args_template: String::new(),
+			optional: false,
+		}),
+	]);
+	spec.parallel = Some(true);
+
+	let args = RunArgs::default();
+	let counter = StepCounter::new(2);
+	let resolver = RecordingResolver::default();
+
+	execute_parallel_with_counter(
+		&spec,
+		&shell,
+		&args,
+		dir.path(),
+		None,
+		false,
+		&counter,
+		&resolver,
+		None,
+		&[],
+		Some("[outer] "), // inherited from a parallel grandparent
+	)
+	.unwrap();
+
+	let calls = resolver.calls.lock().unwrap().clone();
+	assert_eq!(calls.len(), 2);
+	for c in &calls {
+		assert_eq!(
+			c.output_prefix.as_deref(),
+			Some("[outer] "),
+			"inherited prefix must propagate verbatim, got {:?}",
+			c.output_prefix
+		);
+	}
+}
+
+#[test]
+fn sequential_target_call_forwards_output_prefix() {
+	// `execute_one_target_call` (sequential `@dep` invocation) must forward
+	// `setup.output_prefix` to the resolver. Without this, a parent's
+	// inherited prefix would stop at the first sequential `@dep` boundary.
+	use crate::executor::execute_command_with_counter;
+	use crate::logging::StepCounter;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let spec = CommandSpec::new(vec![CommandStep::TargetCall(runfile_parser::TargetCallStep {
+		target: "child".into(),
+		args_template: String::new(),
+		optional: false,
+	})]);
+
+	let args = RunArgs::default();
+	let counter = StepCounter::new(1);
+	let resolver = RecordingResolver::default();
+
+	execute_command_with_counter(
+		&spec,
+		&shell,
+		&args,
+		dir.path(),
+		None,
+		false,
+		&counter,
+		&resolver,
+		None,
+		&[],
+		Some("[3] "),
+	)
+	.unwrap();
+
+	let calls = resolver.calls.lock().unwrap().clone();
+	assert_eq!(calls.len(), 1);
+	assert_eq!(calls[0].target, "child");
+	assert_eq!(calls[0].output_prefix.as_deref(), Some("[3] "));
+}
+
+#[test]
+fn top_level_no_prefix_means_no_propagation_through_sequential() {
+	// Top-level (no parallel ancestor) → output_prefix is None and stays
+	// None when forwarded to a sequential `@dep` call. We only prefix when
+	// inside a parallel context.
+	use crate::executor::execute_command_with_counter;
+	use crate::logging::StepCounter;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let spec = CommandSpec::new(vec![CommandStep::TargetCall(runfile_parser::TargetCallStep {
+		target: "child".into(),
+		args_template: String::new(),
+		optional: false,
+	})]);
+
+	let args = RunArgs::default();
+	let counter = StepCounter::new(1);
+	let resolver = RecordingResolver::default();
+
+	execute_command_with_counter(
+		&spec,
+		&shell,
+		&args,
+		dir.path(),
+		None,
+		false,
+		&counter,
+		&resolver,
+		None,
+		&[],
+		None,
+	)
+	.unwrap();
+
+	let calls = resolver.calls.lock().unwrap().clone();
+	assert_eq!(calls.len(), 1);
+	assert_eq!(calls[0].output_prefix, None);
+}
+
+#[test]
+fn parallel_propagates_prefix_through_real_dispatched_target() {
+	// End-to-end through the runner: a parallel parent dispatching to a
+	// real target whose commands write to a file. Verifies the wiring is
+	// fully connected (parent parallel → resolver → run_target_inner →
+	// dispatched target's ExecSetup), without depending on stdout capture.
+	// The prefix itself is verified by the recording-resolver tests; this
+	// test just guards against a regression that breaks the dispatch path.
+	use crate::runner::run_target;
+	use runfile_parser::Runfile;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let marker_a = dir.path().join("a.txt");
+	let marker_b = dir.path().join("b.txt");
+	let marker_a_esc = json_escape_path(&marker_a);
+	let marker_b_esc = json_escape_path(&marker_b);
+
+	let touch_a = if shell.kind == ShellKind::Cmd {
+		format!("echo done > \\\"{marker_a_esc}\\\"")
+	} else {
+		format!("touch \\\"{marker_a_esc}\\\"")
+	};
+	let touch_b = if shell.kind == ShellKind::Cmd {
+		format!("echo done > \\\"{marker_b_esc}\\\"")
+	} else {
+		format!("touch \\\"{marker_b_esc}\\\"")
+	};
+
+	let json = format!(
+		r#"{{
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+		"targets": {{
+			"child-a": {{ "commands": ["{touch_a}"] }},
+			"child-b": {{ "commands": ["{touch_b}"] }},
+			"main": {{
+				"parallel": true,
+				"commands": ["@child-a", "@child-b"]
+			}}
+		}}
+	}}"#
+	);
+
+	let runfile: Runfile = serde_json::from_str(&json).unwrap();
+	let args = RunArgs::default();
+	run_target("main", &runfile, &shell, &args, dir.path()).unwrap();
+
+	assert!(marker_a.exists(), "child-a should have been dispatched");
+	assert!(marker_b.exists(), "child-b should have been dispatched");
 }

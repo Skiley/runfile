@@ -95,6 +95,7 @@ impl DependencyResolver for RunnerDependencyResolver<'_> {
 		parent_env: &HashMap<String, String>,
 		parent_add_to_path_chain: &[Vec<String>],
 		optional: bool,
+		output_prefix: Option<&str>,
 	) -> Result<ExecutionResult, ExecuteError> {
 		// `@?target` opts into "skip when target is missing". The check uses the
 		// same lookup the runner itself performs (`targets.get`), so optional
@@ -124,6 +125,7 @@ impl DependencyResolver for RunnerDependencyResolver<'_> {
 			&child_args,
 			Some(parent_env),
 			parent_add_to_path_chain,
+			output_prefix,
 			&mut chain,
 		) {
 			Ok(result) => Ok(result),
@@ -211,7 +213,7 @@ pub fn run_target_with_cwd(
 		step_counter: StepCounter::new(total_leaves),
 	};
 	let mut chain: Vec<String> = Vec::new();
-	run_target_inner(&root, target_name, args, None, &[], &mut chain)
+	run_target_inner(&root, target_name, args, None, &[], None, &mut chain)
 }
 
 /// Recursive entry for running a target. Used by both the top-level CLI
@@ -222,29 +224,41 @@ pub fn run_target_with_cwd(
 /// dedup at this layer — every call runs.
 /// `parent_add_to_path_chain` is the accumulated `addToPath` chain from
 /// ancestors (outermost first); empty for top-level invocations.
+#[allow(clippy::too_many_arguments)]
 fn run_target_inner(
 	root: &RunRoot<'_>,
 	target_name: &str,
 	args: &RunArgs,
 	parent_env: Option<&HashMap<String, String>>,
 	parent_add_to_path_chain: &[Vec<String>],
+	output_prefix: Option<&str>,
 	chain: &mut Vec<String>,
 ) -> Result<ExecutionResult, RunError> {
 	if chain.iter().any(|t| t == target_name) {
 		return Err(RunError::CycleDetected(target_name.to_string()));
 	}
 	chain.push(target_name.to_string());
-	let result = run_target_inner_body(root, target_name, args, parent_env, parent_add_to_path_chain, chain);
+	let result = run_target_inner_body(
+		root,
+		target_name,
+		args,
+		parent_env,
+		parent_add_to_path_chain,
+		output_prefix,
+		chain,
+	);
 	chain.pop();
 	result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_target_inner_body(
 	root: &RunRoot<'_>,
 	target_name: &str,
 	args: &RunArgs,
 	parent_env: Option<&HashMap<String, String>>,
 	parent_add_to_path_chain: &[Vec<String>],
+	output_prefix: Option<&str>,
 	_chain: &mut Vec<String>,
 ) -> Result<ExecutionResult, RunError> {
 	let spec = root
@@ -373,6 +387,7 @@ fn run_target_inner_body(
 			&resolver,
 			parent_env,
 			parent_add_to_path_chain,
+			output_prefix,
 		)
 	} else {
 		execute_command_with_counter(
@@ -386,6 +401,7 @@ fn run_target_inner_body(
 			&resolver,
 			parent_env,
 			parent_add_to_path_chain,
+			output_prefix,
 		)
 	};
 

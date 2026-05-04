@@ -5,6 +5,7 @@ mod executor;
 mod extract;
 mod force_kill;
 mod logging;
+mod parallel_output;
 mod runner;
 mod stdio_tailer;
 

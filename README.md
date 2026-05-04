@@ -221,6 +221,26 @@ namespace.
 ]
 ```
 
+#### Readable parallel output
+
+When commands run in parallel (`"parallel": true` on a target or `for` block), each branch's stdout/stderr is
+line-buffered, prefixed with its step number `[N]`, and stripped of cursor-control escapes — so progress-bar
+redraws (`docker compose pull`, `cargo build`, etc.) become chronological append-only lines instead of corrupting
+each other's output. SGR colors flow through unchanged. The prefix propagates through `@target` invocations too,
+so monorepo fan-outs like `{ "for": "ns", "in": "namespaces", "do": "@$(LOOP.ns):dev" }` tag every nested shell
+with its branch identity. Set `RUNFILE_NO_LINE_PREFIX=1` to opt out and inherit raw stdio.
+
+```text
+[runfile] (1/3) [parallel] docker compose pull api
+[runfile] (2/3) [parallel] docker compose pull web
+[runfile] (3/3) [parallel] docker compose pull worker
+[1] Pulling api ... 50%
+[2] Pulling web ... 30%
+[3] Pulling worker ... 100%
+[1] Pulling api ... 100%
+[2] Pulling web ... 100%
+```
+
 #### Cleanup on failure / always with `when:` blocks
 
 Wrap any commands in a `when:` block to run them only after a failure, or always — interleaved with the rest of

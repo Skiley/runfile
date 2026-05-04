@@ -192,7 +192,7 @@ crates/
 ### runfile-executor
 
 **Files:** `args.rs`, `control_flow.rs`, `env.rs`, `executor.rs`, `force_kill.rs`, `logging.rs`,
-`runner.rs`, `stdio_tailer.rs`, `tests.rs`
+`parallel_output.rs`, `runner.rs`, `stdio_tailer.rs`, `tests.rs`
 
 - `RunArgs`: parses CLI args into positional (`$(ARGS)`) and named (`--key=value`). Carries a `run_context: RunContext`
   field used to resolve `$(RUN.*)` substitutions; populated by the CLI via `RunArgs::parse(...).with_run_context(...)`.
@@ -295,8 +295,33 @@ crates/
   `DependencyResolver` can borrow non-`'static` runner state. All leaves run concurrently; the outer call waits
   for processes + thread joins. Inside a parallel context, nested `for parallel: true` blocks are forced
   sequential (a warning is printed) — only the *outermost* parallel layer actually runs concurrently. Nested
-  `parallel: true` *targets* (via `@target`) DO fan out further. stdout/stderr are inherited for real-time
-  output. Same counter-sharing pattern.
+  `parallel: true` *targets* (via `@target`) DO fan out further. Shell leaves use `Stdio::piped()` and route
+  output through `parallel_output::spawn_line_pump` (line-buffered, prefixed, ANSI-cursor-stripped) — see
+  `parallel_output.rs` below. Stdin is still inherited. **The output prefix propagates through `@target`
+  calls**: the parallel batch hands each leaf's prefix to `DependencyResolver::run_dependency` via the
+  `output_prefix` parameter, the runner threads it through `run_target_inner` into the dispatched target's
+  `ExecSetup.output_prefix`, and from there every shell (sequential `execute_one_shell` and any nested
+  parallel batch) tags its piped output with that string. Result: `dev` targets that fan out via
+  `for in: "namespaces"` + `@$(LOOP.ns):dev` get cleanly tagged per-branch output even when the leaves are
+  `@target` calls rather than direct shells. Same counter-sharing pattern.
+- `parallel_output.rs`: line-buffered, prefixed stdout/stderr for parallel shell children. `spawn_line_pump`
+  reads from a `ChildStdout`/`ChildStderr`, splits on `\n` and `\r` (CR-as-soft-break flattens progress-bar
+  redraws into chronological append-only lines), strips non-SGR ANSI escapes (cursor movement, erase-line, OSC
+  title — SGR `…m` color/style codes are preserved), and writes each completed line prefixed with `[N] ` where
+  N is the global step number. Each prefix uses one of six cycling ANSI colors so adjacent leaves are visually
+  distinct; honors `NO_COLOR` for plain output. `\r\n` is collapsed (the LF after a CR is swallowed) so we
+  don't emit spurious empty lines. Each line is one `write_all` to the locked global stdout/stderr handle —
+  prefix + content + newline lands as a single atomic write so two children can't interleave mid-line.
+  `RUNFILE_NO_LINE_PREFIX=1`/`true` opts out (raw stdio inheritance). Pump threads terminate naturally on EOF
+  (i.e. when the child closes its end of the pipe on exit) and are `join`-ed in the wait loop so all output is
+  flushed before the function returns.
+- Output-prefix inheritance rule: when a parallel batch is reached via an ancestor that already set a prefix
+  (i.e. this target was dispatched as `@dep` from an outer parallel parent and `setup.output_prefix.is_some()`),
+  every leaf in this batch inherits that prefix verbatim — no per-leaf step renumbering. This preserves the
+  outer partition identity end-to-end: a `[3]`-tagged branch stays `[3]` even when its dispatched target is
+  itself `parallel: true`. Nested differentiation isn't applied; only the outermost parallel layer is the
+  source of distinct prefixes. Sequential `execute_one_shell` and the `when:failure` / `when:always`
+  fallback path (`run_sequential_leaves`) honor the same inherited prefix.
 - `stdio_tailer.rs`: `StdioTailerSet` manages background threads that tail log files and route complete lines to
   stdout or stderr. Used by `execute_command()` and `execute_parallel()` when `extendStdio` is configured. Polls
   files every 50ms, handles files that don't exist yet or get truncated/rotated, and only emits complete lines
@@ -418,8 +443,14 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   scoping (innermost wins). `parallel: true` on a `for` block runs iterations concurrently, but **outer parallel
   only**: a nested `for parallel: true` inside an already-parallel context is forced sequential (with a warning).
 - `ignoreErrors` makes the CLI exit 0 even when commands fail — this is the specified behavior, not a bug.
-- `parallel` spawns all commands simultaneously; stdout/stderr are inherited (not buffered). The target finishes when
-  all commands exit. With `ignoreErrors`, failures are counted but exit is 0.
+- `parallel` spawns all shell commands simultaneously; their stdout/stderr is piped through line-buffered reader
+  threads that prefix every line with `[N]` (the global step number) and strip non-SGR ANSI cursor-control
+  escapes — so progress-bar redraws (`docker compose pull`, etc.) become append-only chronological lines instead
+  of corrupting interleaved output. Stdin is inherited. **`@target` calls inside a parallel parent propagate
+  the parent's prefix through the entire dispatched dependency subtree** (via `DependencyResolver::run_dependency(..., output_prefix)`),
+  so a `dev` target that fans out via `for in: "namespaces"` + `@$(LOOP.ns):dev` gets every nested shell tagged
+  with its parallel branch identity. Set `RUNFILE_NO_LINE_PREFIX=1`/`true` to disable prefixing and inherit raw
+  stdio. The target finishes when all commands exit. With `ignoreErrors`, failures are counted but exit is 0.
 - `detach` requires `parallel: true`. When both are set, commands are spawned in parallel as detached background
   processes and the CLI exits immediately.
 - Logging goes to stderr so it doesn't interfere with command stdout.
