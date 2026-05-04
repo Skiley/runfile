@@ -94,7 +94,21 @@ impl DependencyResolver for RunnerDependencyResolver<'_> {
 		args: Vec<String>,
 		parent_env: &HashMap<String, String>,
 		parent_add_to_path_chain: &[Vec<String>],
+		optional: bool,
 	) -> Result<ExecutionResult, ExecuteError> {
+		// `@?target` opts into "skip when target is missing". The check uses the
+		// same lookup the runner itself performs (`targets.get`), so optional
+		// dispatch matches non-optional dispatch exactly when the target *does*
+		// exist. Aliases via `@target` don't currently round-trip through this
+		// resolver path — see runtime semantics in `run_target_inner_body`.
+		if optional && !self.root.runfile.targets.contains_key(target_name) {
+			return Ok(ExecutionResult {
+				commands_run: 0,
+				failures: 0,
+				final_status: dummy_success_status(),
+			});
+		}
+
 		// Build a child RunArgs from the tokenized argv. We re-parse so
 		// `--key value` / `--key=value` / positional split is consistent with
 		// the CLI's parser, then re-attach the parent's run_context (the
@@ -454,8 +468,13 @@ fn count_step_leaves_recursive(
 				// resolve at runtime; we can't recurse into them statically. Count
 				// the call as 1 leaf and let `StepCounter::add_to_total` bump the
 				// total at runtime if the dispatched target exposes more leaves.
+				// Optional calls (`@?target`) on a static target name that
+				// doesn't exist contribute 0 leaves — they'll be silently
+				// skipped at runtime.
 				if call.target.contains("$(") {
 					1
+				} else if call.optional && !runfile.targets.contains_key(&call.target) {
+					0
 				} else {
 					count_target_leaves_recursive(&call.target, runfile, cache, in_progress)?
 				}
@@ -550,8 +569,12 @@ fn collect_step_commands(
 				}
 				// Dynamic target names resolve at runtime; we can't recurse
 				// into them statically. Their args templates were already
-				// captured above.
-				if !call.target.contains("$(") {
+				// captured above. Optional calls (`@?target`) on a static
+				// target name that doesn't exist also skip recursion — at
+				// runtime they're silently no-ops.
+				let is_dynamic = call.target.contains("$(");
+				let optional_missing = call.optional && !runfile.targets.contains_key(&call.target);
+				if !is_dynamic && !optional_missing {
 					// Recurse into the called target's commands (cycle-safe).
 					// `completed` makes diamond dependencies count once for
 					// sizing — actual runtime invocations still don't dedup.

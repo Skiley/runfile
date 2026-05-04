@@ -20,6 +20,9 @@ pub enum ParseError {
 	#[error("Target name \"{0}\" must not start with ':' (reserved for built-in commands)")]
 	ReservedTargetName(String),
 
+	#[error("Target name \"{0}\" must not contain '?' (reserved for the `@?target` optional-call marker)")]
+	TargetNameContainsQuestionMark(String),
+
 	#[error("Runfile must define at least one target")]
 	NoTargets,
 
@@ -34,6 +37,9 @@ pub enum ParseError {
 
 	#[error("Alias \"{0}\" in target \"{1}\" must not start with ':' (reserved for built-in commands)")]
 	ReservedAlias(String, String),
+
+	#[error("Alias \"{0}\" in target \"{1}\" must not contain '?' (reserved for the `@?target` optional-call marker)")]
+	AliasContainsQuestionMark(String, String),
 
 	#[error("Alias \"{0}\" in target \"{1}\" is the same as the target name")]
 	AliasSameAsTarget(String, String),
@@ -238,6 +244,18 @@ fn validate_target_call(call: &TargetCallStep, context: &str) -> Result<(), Pars
 			reason: format!("target name \"{}\" contains whitespace", call.target),
 		});
 	}
+	// `?` is reserved for the `@?target` optional-call marker. The marker is
+	// stripped at parse time, so any `?` appearing in `call.target` is part of
+	// the target name itself (e.g. `@target?` or `@nam?e`) — reject it.
+	if call.target.contains('?') {
+		return Err(ParseError::InvalidTargetCall {
+			context: context.to_string(),
+			reason: format!(
+				"target name \"{}\" contains '?' (reserved for the `@?target` optional-call marker — write `@?target` to mark the call optional)",
+				call.target
+			),
+		});
+	}
 	Ok(())
 }
 
@@ -331,6 +349,9 @@ fn validate_runfile(runfile: &mut Runfile, require_targets: bool) -> Result<(), 
 		if is_reserved_name(name) {
 			return Err(ParseError::ReservedTargetName(name.clone()));
 		}
+		if name.contains('?') {
+			return Err(ParseError::TargetNameContainsQuestionMark(name.clone()));
+		}
 
 		if spec.commands.is_empty() {
 			return Err(ParseError::EmptyCommandList(name.clone()));
@@ -362,6 +383,9 @@ fn validate_runfile(runfile: &mut Runfile, require_targets: bool) -> Result<(), 
 					}
 					if is_reserved_name(alias) {
 						return Err(ParseError::ReservedAlias(alias.clone(), name.clone()));
+					}
+					if alias.contains('?') {
+						return Err(ParseError::AliasContainsQuestionMark(alias.clone(), name.clone()));
 					}
 					if runfile.targets.contains_key(alias) {
 						return Err(ParseError::AliasConflictsWithTarget(alias.clone(), name.clone()));

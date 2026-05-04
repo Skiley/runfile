@@ -233,31 +233,48 @@ crates/
   to a 1-iteration estimate since it doesn't see the Runfile), `For glob` / `For shell` → `body_count`
   (1-iteration estimate; runtime calls `StepCounter::add_to_total` to bump the total when actual iterations
   exceed the estimate, so `N` always stays ≤ `total`).
-- Target invocations (`@target args...`): a string command entry starting with `@` deserializes as
-  `CommandStep::TargetCall { target, args_template }`. At execute time, **both** `target` and `args_template` go
-  through normal substitution (so `$(ARGS)` / `$(RUN.*)` / `$(ENV.*)` / `$(LOOP.*)` resolve), then `args_template`
-  is `shlex`-split into argv before being dispatched. Substituting the target name lets dynamic patterns like
-  `@$(LOOP.ns):build` (the canonical use case for `for in: "namespaces"`) dispatch to the right namespaced
-  target on each iteration. Static analysis (the runner's `count_target_leaves_recursive`,
-  `collect_commands_recursive`) treats names containing `$(` as opaque — counts as 1 leaf, no recursion into the
-  called target — so the step counter relies on `add_to_total` to bump at runtime if the dispatched target
-  exposes more leaves. The executor calls back into the runner via the [`DependencyResolver`] trait; tests that
-  don't have a runner use `NoOpDependencyResolver` (which errors on `@`). `@target` invocations have **no
-  dedup** — calling the same target twice runs it twice — but cycles are still rejected via per-call-stack chain
-  tracking on the post-substitution name. Each
-  invocation inherits the parent's already-resolved env as a substitution base, then layers its own
-  `envFiles`/`env` on top (dep wins per key) — but the **current shell env always wins** over both via the
-  `overlay_shell_env` step. `addToPath` is threaded as a separate `parent_add_to_path_chain: Vec<Vec<String>>`
-  (one layer per ancestor in chain order, outermost first); each call appends its own `add_to_path` and the full
-  chain is re-prepended to PATH after the shell-env overlay, so PATH ends up `[innermost addToPath…, …, outermost
-  addToPath…, shell PATH]`. The trait method
-  `DependencyResolver::run_dependency(target, args, parent_env, parent_add_to_path_chain)` carries both pieces of
-  state. `ExecSetup` precomputes `add_to_path_chain = parent_chain + this target's spec.add_to_path` and hands
-  *that* slice to every nested `@dep` call (innermost-first ordering is enforced by `apply_add_to_path_chain`,
-  not by the chain layout — the chain is stored outermost-first as it accumulates). `forceShell` and other
-  target-level config are NOT inherited. Inside `parallel: true` parents, target calls run on worker threads via
-  `std::thread::scope` so the resolver can borrow runner state (and the chain slice) without `'static` lifetime
-  requirements. Nested `parallel: true` deps fan out further (no enforced sequentialization).
+- Target invocations (`@target args...` / `@?target args...`): a string command entry starting with `@`
+  deserializes as `CommandStep::TargetCall { target, args_template, optional }`. The `@?` prefix sets
+  `optional: true` and is stripped from the in-memory `target` field; the marker round-trips through serde via
+  the manual `Serialize` impl on `CommandStep` (re-emits `@?` when `optional`). Optional calls silently skip
+  when the (substituted) target isn't found in the merged Runfile — useful with `for in: "namespaces"` patterns
+  where some namespaces don't define the dispatched target (`@?$(LOOP.ns):adb-forward`). The skip only suppresses
+  the *missing-target* error; failures *inside* the target's commands are not silenced (use `ignoreErrors` for
+  that). At execute time, **both** `target` and `args_template` go through normal substitution (so `$(ARGS)` /
+  `$(RUN.*)` / `$(ENV.*)` / `$(LOOP.*)` resolve), then `args_template` is `shlex`-split into argv before being
+  dispatched. Substituting the target name lets dynamic patterns like `@$(LOOP.ns):build` (the canonical use
+  case for `for in: "namespaces"`) dispatch to the right namespaced target on each iteration. The `?` character
+  is reserved for the optional marker — declared target names, aliases, and `includes` namespaces are rejected
+  at parse time if they contain `?` (`ParseError::TargetNameContainsQuestionMark`,
+  `ParseError::AliasContainsQuestionMark`, plus the namespace check in `merge::validate_namespace`); a literal
+  `?` inside a `@target` reference (e.g. `@foo?bar`) is also rejected via `validate_target_call`. Static
+  analysis (the runner's `count_target_leaves_recursive`, `collect_commands_recursive`) treats names containing
+  `$(` as opaque — counts as 1 leaf, no recursion into the called target — so the step counter relies on
+  `add_to_total` to bump at runtime if the dispatched target exposes more leaves. **Optional calls on a
+  statically-missing target contribute 0 leaves and skip recursion** (since they'll be runtime no-ops); optional
+  calls on a present target recurse normally. Dynamic optional calls (`@?$(...)`) still count as 1 leaf each
+  (the namespace iteration count drives the for-block multiplier), and the slot is "wasted" but harmless when
+  the target turns out to be missing at dispatch — total ≥ N is preserved. The executor calls back into the
+  runner via the [`DependencyResolver`] trait, which now carries an `optional: bool` parameter on
+  `run_dependency`; tests that don't have a runner use `NoOpDependencyResolver` (which errors on `@`).
+  `@target` invocations have **no dedup** — calling the same target twice runs it twice — but cycles are still
+  rejected via per-call-stack chain tracking on the post-substitution name. Each invocation inherits the
+  parent's already-resolved env as a substitution base, then layers its own `envFiles`/`env` on top (dep wins
+  per key) — but the **current shell env always wins** over both via the `overlay_shell_env` step. `addToPath`
+  is threaded as a separate `parent_add_to_path_chain: Vec<Vec<String>>` (one layer per ancestor in chain order,
+  outermost first); each call appends its own `add_to_path` and the full chain is re-prepended to PATH after
+  the shell-env overlay, so PATH ends up `[innermost addToPath…, …, outermost addToPath…, shell PATH]`. The
+  trait method
+  `DependencyResolver::run_dependency(target, args, parent_env, parent_add_to_path_chain, optional)` carries
+  all of these pieces of state. `ExecSetup` precomputes
+  `add_to_path_chain = parent_chain + this target's spec.add_to_path` and hands *that* slice to every nested
+  `@dep` call (innermost-first ordering is enforced by `apply_add_to_path_chain`, not by the chain layout — the
+  chain is stored outermost-first as it accumulates). `forceShell` and other target-level config are NOT
+  inherited. Inside `parallel: true` parents, target calls run on worker threads via `std::thread::scope` so
+  the resolver can borrow runner state (and the chain slice) without `'static` lifetime requirements. The
+  optional flag is forwarded to `ParallelLeaf::TargetCall { optional }` and on into the per-thread
+  `run_dependency` call, so optional skip semantics work uniformly in sequential, parallel-shell, and
+  parallel-`@target` contexts. Nested `parallel: true` deps fan out further (no enforced sequentialization).
 - `env.rs`: thin bridge that converts `CommandSpec` (parser type) into raw data for `runfile-env`, wiring
   `RunArgs::substitute` as the substitution closure. Re-exports `EnvFileError` and `parse_env_file` from `runfile-env`.
   Passes `available_private_keys` through for automatic encrypted env decryption.

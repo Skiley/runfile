@@ -498,6 +498,9 @@ fn validate_namespace(ns: &str) -> Result<(), String> {
 	if first == '_' {
 		return Err("namespace must not start with '_' (reserved for internal-target naming)".into());
 	}
+	if ns.contains('?') {
+		return Err("namespace must not contain '?' (reserved for the `@?target` optional-call marker)".into());
+	}
 	Ok(())
 }
 

@@ -4333,8 +4333,48 @@ fn if_ignore_errors_swallows_body_failure() {
 	let spec = parse_target(&spec_json, "t");
 	let args = RunArgs::parse(&["--go=yes".into()]);
 	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
-	// "after" still runs because ignoreErrors swallowed the failure.
-	assert!(result.final_status.success() || result.commands_run >= 1);
+	// "echo after" must run — the if-block's ignoreErrors swallows the
+	// failure so the outer walker doesn't flip state.failed and skip it.
+	assert_eq!(result.commands_run, 2, "both fail_cmd and `echo after` should have run");
+	assert!(
+		result.final_status.success(),
+		"target should succeed when the only failure is inside an ignoreErrors:true block"
+	);
+}
+
+#[test]
+fn for_body_if_ignore_errors_does_not_skip_subsequent_iterations() {
+	// Regression: a `for` whose body is `[ if ignoreErrors:true { fail } ]`
+	// used to run the if-step only on iteration 1 — the swallowed failure
+	// still incremented the outer failure counter, which made the outer
+	// walker flip state.failed, which made the default-`when:success`
+	// if-step skip on every later iteration.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let fail_cmd = if shell.kind == ShellKind::Cmd {
+		"exit /b 1"
+	} else {
+		"exit 1"
+	};
+	let spec_json = format!(
+		r#"{{"$schema":"x","targets":{{"t":{{"commands":[
+			{{"for":"x","in":["a","b","c"],"do":[
+				{{"if":"a == a","then":["{fail_cmd}"],"ignoreErrors":true}}
+			]}}
+		]}}}}}}"#
+	);
+	let spec = parse_target(&spec_json, "t");
+	let args = RunArgs::default();
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert_eq!(
+		result.commands_run, 3,
+		"the if-step must execute on all three iterations"
+	);
+	// `final_status` mirrors the last command run — which here is the
+	// ignored failure of iteration 3 — matching `execute_when_block`'s
+	// behavior (only the `failed` flag and failure count are isolated,
+	// not `last_status`). The actual fix being tested is that all 3
+	// iterations ran; with the bug, only iteration 1 did.
 }
 
 #[test]
@@ -4436,6 +4476,98 @@ fn for_in_namespaces_with_dynamic_target_call_runs_each_namespaced_target() {
 		dir.path().join("two.built").exists(),
 		"project_two:build should have run"
 	);
+}
+
+#[test]
+fn optional_target_call_skips_when_missing() {
+	// The user's adb-forward use case: iterate every namespace, calling an
+	// optional `@?<ns>:adb-forward`. Only namespaces that define the target
+	// run; missing ones are silent no-ops (no error, no failure).
+	use crate::runner::run_target;
+	use runfile_parser::parse_runfile;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let touch_marker = match shell.kind {
+		ShellKind::Cmd => "type nul > marker.touched",
+		ShellKind::PowerShell => "New-Item -ItemType File -Path marker.touched -Force | Out-Null",
+		_ => "touch marker.touched",
+	};
+
+	let json = format!(
+		r#"{{
+		"$schema": "x",
+		"targets": {{
+			"with_it:adb-forward": {{ "commands": ["{touch_marker}"] }},
+			"without_it:other": {{ "commands": ["echo never"] }},
+			"adb-forward": {{
+				"commands": [
+					{{ "for": "ns", "in": "namespaces", "do": "@?$(LOOP.ns):adb-forward" }}
+				]
+			}}
+		}}
+	}}"#
+	);
+
+	let mut runfile = parse_runfile(&json).unwrap();
+	runfile.namespaces = vec!["with_it".to_string(), "without_it".to_string()];
+
+	let args = RunArgs::default();
+	let result = run_target("adb-forward", &runfile, &shell, &args, dir.path()).unwrap();
+	assert!(
+		result.final_status.success(),
+		"adb-forward should succeed even when one namespace lacks the target"
+	);
+	assert_eq!(
+		result.failures, 0,
+		"missing optional target must not count as a failure"
+	);
+	assert!(
+		dir.path().join("marker.touched").exists(),
+		"with_it:adb-forward should have run"
+	);
+}
+
+#[test]
+fn optional_target_call_static_missing_skips_silently() {
+	// Static `@?missing` on a non-existent target is a no-op at runtime.
+	use crate::runner::run_target;
+	use runfile_parser::parse_runfile;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"caller": { "commands": ["@?does-not-exist"] }
+		}
+	}"#;
+	let runfile = parse_runfile(json).unwrap();
+	let args = RunArgs::default();
+	let result = run_target("caller", &runfile, &shell, &args, dir.path()).unwrap();
+	assert_eq!(result.failures, 0);
+}
+
+#[test]
+fn non_optional_target_call_static_missing_errors() {
+	// Sanity: drop the `?` and the same call is a hard error. The optional
+	// behavior must not leak into plain `@target` invocations.
+	use crate::runner::run_target;
+	use runfile_parser::parse_runfile;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"caller": { "commands": ["@does-not-exist"] }
+		}
+	}"#;
+	let runfile = parse_runfile(json).unwrap();
+	let args = RunArgs::default();
+	let err = run_target("caller", &runfile, &shell, &args, dir.path()).unwrap_err();
+	assert!(err.to_string().contains("does-not-exist"), "got: {err}");
 }
 
 #[test]
@@ -4611,6 +4743,65 @@ fn for_in_with_ignore_errors_continues_after_failure() {
 	// uses an env var trick that's hard to set per-iteration), but the loop
 	// must have iterated at least 2 times when ignoreErrors is on.
 	assert!(result.commands_run >= 2, "got commands_run={}", result.commands_run);
+}
+
+#[test]
+fn for_in_ignore_errors_does_not_skip_next_sibling() {
+	// Regression: a sibling step after a `for ignoreErrors:true` that had
+	// failing iterations used to be skipped — the for-block's swallowed
+	// failures still leaked into the outer failure counter, which made the
+	// outer walker flip state.failed and skip the next default-when:success
+	// step.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let fail_cmd = if shell.kind == ShellKind::Cmd {
+		"exit /b 1"
+	} else {
+		"exit 1"
+	};
+	let spec_json = format!(
+		r#"{{"$schema":"x","targets":{{"t":{{"commands":[
+			{{"for":"x","in":["a"],"do":["{fail_cmd}"],"ignoreErrors":true}},
+			"echo after"
+		]}}}}}}"#
+	);
+	let spec = parse_target(&spec_json, "t");
+	let args = RunArgs::default();
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert_eq!(
+		result.commands_run, 2,
+		"both the for-body and `echo after` should have run"
+	);
+	assert!(result.final_status.success());
+}
+
+#[test]
+fn for_in_parallel_ignore_errors_does_not_skip_next_sibling() {
+	// Same regression as the sequential version, but for the parallel branch:
+	// `run_parallel_leaves` was leaking the failure count to the outer state
+	// even when the for-block's ignoreErrors was set.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let fail_cmd = if shell.kind == ShellKind::Cmd {
+		"exit /b 1"
+	} else {
+		"exit 1"
+	};
+	let spec_json = format!(
+		r#"{{"$schema":"x","targets":{{"t":{{"commands":[
+			{{"for":"x","in":["a","b"],"do":["{fail_cmd}"],"parallel":true,"ignoreErrors":true}},
+			"echo after"
+		]}}}}}}"#
+	);
+	let spec = parse_target(&spec_json, "t");
+	let args = RunArgs::default();
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	// 2 parallel iterations + 1 sibling = 3 commands executed.
+	assert_eq!(
+		result.commands_run, 3,
+		"parallel for body (2) plus `echo after` (1) should have run"
+	);
+	assert!(result.final_status.success());
 }
 
 #[test]

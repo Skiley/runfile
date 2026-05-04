@@ -2002,7 +2002,7 @@ fn rewrites_target_calls_inside_control_flow() {
 
 #[test]
 fn invalid_namespace_rejected() {
-	for bad in &[":foo", "foo:bar", "_foo", "@foo", "foo bar", ""] {
+	for bad in &[":foo", "foo:bar", "_foo", "@foo", "foo bar", "", "ns?bad", "?leading"] {
 		let dir = TempDir::new().unwrap();
 		std::fs::write(
 			dir.path().join("child.json"),
@@ -3316,4 +3316,165 @@ fn parse_dsl_features_all_supported() {
 		);
 		parse_runfile(&json).unwrap_or_else(|e| panic!("Failed to parse condition `{c}`: {e}"));
 	}
+}
+
+#[test]
+fn parse_optional_target_call_marker() {
+	// `@?target` parses with optional = true; the `?` is stripped from the
+	// in-memory target name.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["@?b --release"] },
+			"b": { "commands": ["echo b"] }
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::TargetCall(call) = &rf.targets["a"].commands[0] {
+		assert_eq!(call.target, "b");
+		assert_eq!(call.args_template, "--release");
+		assert!(call.optional);
+	} else {
+		panic!("expected TargetCall");
+	}
+}
+
+#[test]
+fn parse_optional_target_call_with_dynamic_name() {
+	// `@?$(LOOP.ns):build` is the canonical use case — combine optional with
+	// runtime substitution. The `?` is stripped, leaving the substitutable name.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": {
+				"commands": [
+					{ "for": "ns", "in": "namespaces", "do": "@?$(LOOP.ns):build" }
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::For(for_step) = &rf.targets["a"].commands[0] {
+		if let CommandStep::TargetCall(call) = &for_step.body[0] {
+			assert_eq!(call.target, "$(LOOP.ns):build");
+			assert!(call.optional);
+		} else {
+			panic!("expected TargetCall in for body");
+		}
+	} else {
+		panic!("expected For");
+	}
+}
+
+#[test]
+fn parse_optional_target_call_no_args() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["@?b"] },
+			"b": { "commands": ["echo b"] }
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::TargetCall(call) = &rf.targets["a"].commands[0] {
+		assert_eq!(call.target, "b");
+		assert_eq!(call.args_template, "");
+		assert!(call.optional);
+	} else {
+		panic!("expected TargetCall");
+	}
+}
+
+#[test]
+fn parse_optional_target_call_empty_name_errors() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["@?"] }
+		}
+	}"#;
+	let err = parse_runfile(json).unwrap_err().to_string();
+	assert!(err.contains("@?") || err.contains("target name"), "got: {err}");
+}
+
+#[test]
+fn parse_non_optional_target_call_has_optional_false() {
+	// Plain `@target` should leave optional = false (not the new opt-in).
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["@b"] },
+			"b": { "commands": ["echo"] }
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::TargetCall(call) = &rf.targets["a"].commands[0] {
+		assert!(!call.optional);
+	} else {
+		panic!("expected TargetCall");
+	}
+}
+
+#[test]
+fn parse_optional_target_call_serializes_back_with_question_mark() {
+	// Round-trip: the `@?` marker must survive a serialize → deserialize cycle.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["@?b --opt"] },
+			"b": { "commands": ["echo"] }
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	let serialized = serde_json::to_string(&rf).unwrap();
+	assert!(serialized.contains("@?b --opt"), "serialized: {serialized}");
+	// And re-parsing produces the same step.
+	let rf2 = parse_runfile(&serialized).unwrap();
+	if let CommandStep::TargetCall(call) = &rf2.targets["a"].commands[0] {
+		assert_eq!(call.target, "b");
+		assert_eq!(call.args_template, "--opt");
+		assert!(call.optional);
+	} else {
+		panic!("expected TargetCall");
+	}
+}
+
+#[test]
+fn target_name_with_question_mark_rejected() {
+	// `?` is reserved for the `@?target` optional-call marker, so a declared
+	// target name containing `?` must be rejected.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"foo?bar": { "commands": ["echo"] }
+		}
+	}"#;
+	let err = parse_runfile(json).unwrap_err().to_string();
+	assert!(err.contains("?"), "got: {err}");
+}
+
+#[test]
+fn alias_with_question_mark_rejected() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["echo"], "aliases": ["a?b"] }
+		}
+	}"#;
+	let err = parse_runfile(json).unwrap_err().to_string();
+	assert!(err.contains("?"), "got: {err}");
+}
+
+#[test]
+fn target_call_with_question_mark_in_name_rejected() {
+	// `@foo?bar` is parsed as `@<foo?bar>` (no leading `?`), and `foo?bar`
+	// then fails validation because the target name contains `?`.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["@foo?bar"] }
+		}
+	}"#;
+	let err = parse_runfile(json).unwrap_err().to_string();
+	assert!(err.contains("?"), "got: {err}");
 }

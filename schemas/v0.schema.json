@@ -53,15 +53,15 @@
 						},
 						"namespace": {
 							"type": "string",
-							"description": "Optional prefix applied to every target name, alias, and `@target` reference inside the included file. May not be empty (or omit the field), contain ':' or whitespace, or start with '@', ':', or '_'. Nested namespaces compose left-to-right.",
-							"pattern": "^[^_@:\\s][^:\\s]*$"
+							"description": "Optional prefix applied to every target name, alias, and `@target` reference inside the included file. May not be empty (or omit the field), contain ':' or whitespace, contain '?' (reserved for the `@?target` optional-call marker), or start with '@', ':', or '_'. Nested namespaces compose left-to-right.",
+							"pattern": "^[^_@:\\s?][^:\\s?]*$"
 						}
 					}
 				}
 			]
 		},
 		"CommandStep": {
-			"description": "A step inside a `commands` array. Either a raw shell command string, a target invocation (`@target [args...]` — string starting with `@`), a `when`-guarded block, or a control-flow block (`if` / `for` object).",
+			"description": "A step inside a `commands` array. Either a raw shell command string, a target invocation (`@target [args...]` — string starting with `@`, or `@?target [args...]` to silently skip when the target doesn't exist), a `when`-guarded block, or a control-flow block (`if` / `for` object).",
 			"oneOf": [
 				{
 					"type": "string"

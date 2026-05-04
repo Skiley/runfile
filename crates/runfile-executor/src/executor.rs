@@ -53,12 +53,16 @@ pub trait DependencyResolver: Sync {
 	///   (outermost first), with the parent's own `addToPath` already appended.
 	///   The dep extends this chain with its own `addToPath` and re-prepends
 	///   the whole stack to PATH after the shell-env overlay.
+	/// - `optional`: when true, a missing target is silently skipped (returns
+	///   `Ok(empty result)`) rather than producing an `UnknownTarget` error.
+	///   Set by `@?target` invocations.
 	fn run_dependency(
 		&self,
 		target_name: &str,
 		args: Vec<String>,
 		parent_env: &HashMap<String, String>,
 		parent_add_to_path_chain: &[Vec<String>],
+		optional: bool,
 	) -> Result<ExecutionResult, ExecuteError>;
 }
 
@@ -75,6 +79,7 @@ impl DependencyResolver for NoOpDependencyResolver {
 		_args: Vec<String>,
 		_parent_env: &HashMap<String, String>,
 		_parent_add_to_path_chain: &[Vec<String>],
+		_optional: bool,
 	) -> Result<ExecutionResult, ExecuteError> {
 		Err(ExecuteError::DependencyFailed(
 			target_name.to_string(),
@@ -477,7 +482,7 @@ fn execute_one_target_call(
 	// dispatch to the correct namespaced target. No-op for static names.
 	let target = args.substitute_with_loop(&call.target, &setup.env, loop_scope)?;
 	let argv = resolve_target_call_argv(call, args, &setup.env, loop_scope)?;
-	let result = deps.run_dependency(&target, argv, &setup.env, &setup.add_to_path_chain)?;
+	let result = deps.run_dependency(&target, argv, &setup.env, &setup.add_to_path_chain, call.optional)?;
 	state.commands_run += result.commands_run;
 	state.failures += result.failures;
 	state.last_status = Some(result.final_status).or(state.last_status);
@@ -597,8 +602,12 @@ fn execute_if_block(
 		}
 	};
 
-	// Locally treat `ignoreErrors: true` as ignoring the body's failures
-	// without flipping our outer state. We still count them.
+	// `ignoreErrors: true` fully isolates the branch's failures from the
+	// outer state. The failure counter must NOT propagate either: the
+	// outer walker checks `state.failures > pre_failures` to flip
+	// `state.failed`, which would skip subsequent default-`when: success`
+	// siblings (and, when this `if` lives inside a `for` body, every later
+	// iteration's default-success steps). Mirrors `execute_when_block`.
 	let local_ignore = if_step.ignore_errors.unwrap_or(false);
 	// If this `if` is gated with `when: failure` / `when: always`, the
 	// inner branch runs in "fresh" mode (state.failed=false locally) so
@@ -628,23 +637,17 @@ fn execute_if_block(
 
 	state.commands_run += local_state.commands_run;
 	state.last_status = local_state.last_status.or(state.last_status);
-	if !local_ignore {
-		state.failed = state.failed || local_state.failed;
+
+	if local_ignore {
+		// Swallow everything internal: neither the failure count, the
+		// failed flag, nor a walk error propagate.
+		let _ = walk;
+		return Ok(());
 	}
 
-	match walk {
-		Ok(()) => {
-			state.failures += local_state.failures;
-			Ok(())
-		}
-		Err(e) if local_ignore => {
-			// Count this as a failure-but-ignored.
-			state.failures += local_state.failures.max(1);
-			drop(e); // swallow
-			Ok(())
-		}
-		Err(e) => Err(e),
-	}
+	state.failed = state.failed || local_state.failed;
+	state.failures += local_state.failures;
+	walk
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -756,11 +759,19 @@ fn execute_for_block(
 		}
 
 		state.commands_run += local_state.commands_run;
-		state.failures += local_state.failures;
 		state.last_status = local_state.last_status.or(state.last_status);
-		if !local_ignore {
-			state.failed = state.failed || local_state.failed;
+
+		// With `ignoreErrors: true`, the per-iteration `result` was always
+		// `Ok` (errors are converted to `continue` above), so `iter_error`
+		// is `None`. Swallow the failure count and flag entirely so the
+		// outer walker doesn't see new failures and flip `state.failed`
+		// on the next sibling step.
+		if local_ignore {
+			return Ok(());
 		}
+
+		state.failed = state.failed || local_state.failed;
+		state.failures += local_state.failures;
 
 		match iter_error {
 			Some(e) => Err(e),
@@ -836,6 +847,9 @@ enum ParallelLeaf {
 		target: String,
 		argv: Vec<String>,
 		when: WhenCondition,
+		/// Set when the source step was an `@?target` call. Forwarded to the
+		/// resolver so a missing target is silently skipped.
+		optional: bool,
 	},
 }
 
@@ -916,6 +930,7 @@ fn collect_leaves_parallel_with_when(
 					target,
 					argv,
 					when: effective,
+					optional: call.optional,
 				});
 			}
 			CommandStep::When(when_step) => {
@@ -1060,6 +1075,15 @@ fn run_parallel_leaves(
 		)?;
 	}
 
+	// `local_ignore` (set when this batch is the body of a
+	// `for parallel: true` with `ignoreErrors: true`) must fully isolate
+	// internal failures from the outer state — otherwise the outer walker
+	// sees the failure delta and flips `state.failed`, skipping subsequent
+	// default-`when: success` siblings.
+	if local_ignore {
+		state.failures = pre_failures;
+	}
+
 	Ok(())
 }
 
@@ -1107,16 +1131,19 @@ fn run_sequential_leaves(
 					state.failures += 1;
 				}
 			}
-			ParallelLeaf::TargetCall { target, argv, .. } => {
+			ParallelLeaf::TargetCall {
+				target, argv, optional, ..
+			} => {
 				if setup.logging {
+					let prefix = if optional { "@?" } else { "@" };
 					let label = if argv.is_empty() {
-						format!("@{}", target)
+						format!("{}{}", prefix, target)
 					} else {
-						format!("@{} {}", target, argv.join(" "))
+						format!("{}{} {}", prefix, target, argv.join(" "))
 					};
 					log_command(&label, step, total);
 				}
-				let result = deps.run_dependency(&target, argv, &setup.env, &setup.add_to_path_chain)?;
+				let result = deps.run_dependency(&target, argv, &setup.env, &setup.add_to_path_chain, optional)?;
 				state.commands_run += result.commands_run;
 				state.failures += result.failures;
 				state.last_status = Some(result.final_status).or(state.last_status);
@@ -1154,11 +1181,14 @@ fn run_parallel_batch(
 		for (leaf, &(step, total)) in leaves.iter().zip(step_pairs.iter()) {
 			let label = match leaf {
 				ParallelLeaf::Shell { template, .. } => template.clone(),
-				ParallelLeaf::TargetCall { target, argv, .. } => {
+				ParallelLeaf::TargetCall {
+					target, argv, optional, ..
+				} => {
+					let prefix = if *optional { "@?" } else { "@" };
 					if argv.is_empty() {
-						format!("@{}", target)
+						format!("{}{}", prefix, target)
 					} else {
-						format!("@{} {}", target, argv.join(" "))
+						format!("{}{} {}", prefix, target, argv.join(" "))
 					}
 				}
 			};
@@ -1169,13 +1199,15 @@ fn run_parallel_batch(
 	// Split leaves into shells (spawned as processes) and target calls (run
 	// on worker threads).
 	let mut shells: Vec<(String, String)> = Vec::new();
-	let mut target_calls: Vec<(String, Vec<String>)> = Vec::new();
+	let mut target_calls: Vec<(String, Vec<String>, bool)> = Vec::new();
 	for leaf in leaves {
 		match leaf {
 			ParallelLeaf::Shell {
 				template, substituted, ..
 			} => shells.push((template, substituted)),
-			ParallelLeaf::TargetCall { target, argv, .. } => target_calls.push((target, argv)),
+			ParallelLeaf::TargetCall {
+				target, argv, optional, ..
+			} => target_calls.push((target, argv, optional)),
 		}
 	}
 
@@ -1225,8 +1257,8 @@ fn run_parallel_batch(
 	// `parent_env`, and `parent_chain` without requiring `'static`.
 	let dep_results: Vec<Result<ExecutionResult, ExecuteError>> = std::thread::scope(|scope| {
 		let mut handles = Vec::with_capacity(target_calls.len());
-		for (target, argv) in target_calls {
-			handles.push(scope.spawn(move || deps.run_dependency(&target, argv, parent_env, parent_chain)));
+		for (target, argv, optional) in target_calls {
+			handles.push(scope.spawn(move || deps.run_dependency(&target, argv, parent_env, parent_chain, optional)));
 		}
 		handles
 			.into_iter()

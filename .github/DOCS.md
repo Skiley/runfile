@@ -592,15 +592,27 @@ parsed at Runfile load time, so syntax errors fail fast.
 Any string command entry that starts with `@` invokes another target as a step. The text after `@` is split into
 the target name (first token) and an args template (everything after the first whitespace run).
 
+Prefix the target name with `?` (`@?target`) to mark the call **optional**: at execute time, if the (substituted)
+target doesn't exist in the merged Runfile, the call is silently skipped instead of producing an `UnknownTarget`
+error. This is the recommended pattern for `for in: "namespaces"` blocks where some namespaces may not define a
+given target. Note that `@?target` only suppresses the *missing-target* error — it does not silence runtime
+failures from the target's own commands.
+
 ```jsonc
 "commands": [
   "echo running pipeline",
   "@build",                       // call `build` with no args
   "@build --release",             // call `build` with explicit args
   "@build $(ARGS)",               // forward the parent's positional args
-  "@deploy --env=$(ENV.STAGE)"    // any substitution works in the args template
+  "@deploy --env=$(ENV.STAGE)",   // any substitution works in the args template
+  "@?nightly-cleanup",            // silently skipped if `nightly-cleanup` isn't defined
+  // common pattern: per-namespace target that's only defined in some namespaces
+  { "for": "ns", "in": "namespaces", "do": "@?$(LOOP.ns):adb-forward" }
 ]
 ```
+
+`?` is reserved for this marker — target names, aliases, and `includes` namespaces are rejected at parse time if
+they contain `?`.
 
 | Behavior              | Detail                                                                                                                                                                                                       |
 |-----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -611,7 +623,8 @@ the target name (first token) and an args template (everything after the first w
 | Target-level config   | `forceShell`, `workingDirectory`, `parallel`, `confirm`, etc. are **not inherited** — each target picks its own. Only env flows.                                                                             |
 | Inside `if` / `for`   | `@target` is a normal command step — works inside `then` / `else` / `for` body. `if` shorthand `"then": "@deploy"` is the same as `"then": ["@deploy"]`.                                                     |
 | Parallel parents      | When the parent has `parallel: true`, `@target` invocations run on worker threads alongside the sibling shell commands. Nested `parallel: true` deps fan out further (no enforced sequentialization).        |
-| Plain `@` not allowed | `"@"` or `"@ "` (no target name) is a parse error. To run a shell command starting literally with `@`, prefix with a space or wrap in `sh -c`.                                                               |
+| Optional calls        | `@?target` silently skips when the target doesn't exist (no error, no failure counted). Static analysis treats statically-missing optional calls as 0 leaves; dynamic optional calls (`@?$(...)`) still reserve 1 counter slot per dispatch and skip at runtime. Failures *inside* a present target's commands are not silenced — use `ignoreErrors` for that. |
+| Plain `@` not allowed | `"@"` or `"@ "` (no target name) is a parse error. Same for `"@?"` / `"@? "`. To run a shell command starting literally with `@`, prefix with a space or wrap in `sh -c`.                                    |
 
 For an exhaustive table of target invocation semantics (no dedup, env layering, cycle detection), see
 [Target invocations](#target-invocations--target-args).

@@ -216,12 +216,17 @@ Any command string starting with `@` invokes another target. Forward args with `
 Each invocation runs (no dedup), inherits the parent's env, and works inside `if` / `for` blocks. Parallel parents
 fan out target calls onto worker threads.
 
+Prefix with `@?target` to mark the call **optional**: if the (substituted) target doesn't exist, it's silently
+skipped instead of erroring. Useful with `for in: "namespaces"` when the dispatched target isn't defined in every
+namespace.
+
 ```jsonc
 "commands": [
   "@lint",
   "@test --coverage",
   "@build $(ARGS)",
-  { "if": "$(RUN.os) == windows", "then": "@deploy-win", "else": "@deploy-unix" }
+  { "if": "$(RUN.os) == windows", "then": "@deploy-win", "else": "@deploy-unix" },
+  { "for": "ns", "in": "namespaces", "do": "@?$(LOOP.ns):adb-forward" } // skip namespaces without the target
 ]
 ```
 

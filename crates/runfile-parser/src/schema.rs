@@ -32,10 +32,11 @@ impl Serialize for CommandStep {
 		match self {
 			CommandStep::Shell(s) => serializer.serialize_str(s),
 			CommandStep::TargetCall(call) => {
+				let prefix = if call.optional { "@?" } else { "@" };
 				let s = if call.args_template.is_empty() {
-					format!("@{}", call.target)
+					format!("{}{}", prefix, call.target)
 				} else {
-					format!("@{} {}", call.target, call.args_template)
+					format!("{}{} {}", prefix, call.target, call.args_template)
 				};
 				serializer.serialize_str(&s)
 			}
@@ -201,6 +202,18 @@ impl CommandStep {
 		CommandStep::TargetCall(TargetCallStep {
 			target: target.into(),
 			args_template: args_template.into(),
+			optional: false,
+		})
+	}
+
+	/// Convenience constructor for an optional target invocation (`@?target args`).
+	/// At execute time, if the target doesn't resolve, the call is silently
+	/// skipped instead of erroring.
+	pub fn optional_target_call(target: impl Into<String>, args_template: impl Into<String>) -> Self {
+		CommandStep::TargetCall(TargetCallStep {
+			target: target.into(),
+			args_template: args_template.into(),
+			optional: true,
 		})
 	}
 
@@ -305,16 +318,28 @@ impl CommandStep {
 /// custom deserializer that needs the same parsing logic).
 pub(crate) fn command_step_from_string(s: String) -> Result<CommandStep, String> {
 	if let Some(rest) = s.strip_prefix('@') {
+		// `@?` opts into "skip silently when the target doesn't exist". We strip
+		// the `?` here so the in-memory `target` field never carries it; the
+		// `optional` flag is the source of truth.
+		let (rest, optional) = match rest.strip_prefix('?') {
+			Some(after) => (after, true),
+			None => (rest, false),
+		};
 		let (target, args) = match rest.find(char::is_whitespace) {
 			Some(idx) => (rest[..idx].to_string(), rest[idx..].trim_start().to_string()),
 			None => (rest.to_string(), String::new()),
 		};
 		if target.is_empty() {
-			return Err("target invocation `@` must be followed by a target name".to_string());
+			return Err(if optional {
+				"target invocation `@?` must be followed by a target name".to_string()
+			} else {
+				"target invocation `@` must be followed by a target name".to_string()
+			});
 		}
 		Ok(CommandStep::TargetCall(TargetCallStep {
 			target,
 			args_template: args,
+			optional,
 		}))
 	} else {
 		Ok(CommandStep::Shell(s))
@@ -322,18 +347,32 @@ pub(crate) fn command_step_from_string(s: String) -> Result<CommandStep, String>
 }
 
 /// A `@target [args...]` invocation parsed from a string command entry.
-/// The leading `@` is stripped at parse time. `args_template` is the raw
+/// The leading `@` is stripped at parse time. An optional `?` after the `@`
+/// (i.e. `@?target`) marks the call as **optional**: at execute time, if the
+/// (substituted) target name doesn't exist in the merged Runfile, the call is
+/// silently skipped rather than failing. `args_template` is the raw
 /// post-target text (after the first whitespace run). At execute time it goes
 /// through the normal substitution pipeline (so `$(ARGS)`, `$(RUN.*)`, etc.
 /// resolve), then is split into argv via shell-style tokenization.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TargetCallStep {
-	/// Target name (without the leading `@`). Validated as non-empty at parse
-	/// time; existence is checked at runtime against the merged Runfile.
+	/// Target name (without the leading `@` / `@?`). Validated as non-empty at
+	/// parse time; existence is checked at runtime against the merged Runfile.
 	pub target: String,
 	/// Argument template — substituted then shlex-split into argv. Empty if
 	/// the user wrote `@target` with no args.
 	pub args_template: String,
+	/// When true, this call was written as `@?target`: if `target` doesn't
+	/// resolve at execute time, the call is silently skipped (no error, no
+	/// failure counted) rather than aborting the run. Useful with
+	/// `for in: "namespaces"` patterns where some namespaces may not define
+	/// a given target.
+	#[serde(default, skip_serializing_if = "is_false")]
+	pub optional: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+	!*b
 }
 
 /// Walk a slice of [`CommandStep`]s and call `visit` on every leaf template
