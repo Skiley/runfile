@@ -357,9 +357,12 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   file→file with public key prefix match), and `inject` (run a command with env vars from one or more `.env` files
   injected, à la `dotenvx run` — `-f <file>` repeatable, defaults to `.env`, encrypted values auto-decrypted in
   memory, command runs after `--`, `RUNFILE_ENCRYPTION_PUBLIC_KEY` is stripped before injection, the child's exit
-  code is propagated). The program is resolved via `which::which_in` against the *effective* PATH the child will
-  see (env-file PATH override if present — case-insensitive — otherwise inherited PATH), so PATHEXT-style shims
-  like `node_modules/.bin/vite.cmd` are found on Windows. Rust's `Command::new` only appends `.exe` via
+  code is propagated). **Parent process env always wins**: after files are merged and decrypted, any key already
+  defined in the parent process is dropped from the file-loaded map (`std::env::var_os` for platform-correct case
+  sensitivity), so the inherited value reaches the child unmodified — file-loaded values only fill in gaps. The
+  program is resolved via `which::which_in` against the *effective* PATH the child will see (inherited PATH if
+  any, otherwise the env-file PATH — case-insensitive on Windows), so PATHEXT-style shims like
+  `node_modules/.bin/vite.cmd` are found on Windows. Rust's `Command::new` only appends `.exe` via
   `CreateProcessW`, so without this lookup `npm`-installed shims would fail with "program not found". The `secret-keys` subgroup includes `add`, `list`, `get-private` (print full private key for
   sharing, matched by public key prefix), and `remove` (matched by public key prefix). All key matching throughout
   the CLI uses public key prefixes, never private key prefixes.

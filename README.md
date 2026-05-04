@@ -170,7 +170,7 @@ any command — no Runfile needed:
 
 ```bash
 $ run :env inject -- node app.js                          # uses .env by default
-$ run :env inject -f .env -f .env.local -- pnpm dev       # multiple files, last wins
+$ run :env inject -f .env -f .env.local -- pnpm dev       # multiple files, last wins; parent env always wins
 $ run :env inject -f .env.production -- ./deploy.sh       # encrypted values auto-decrypted
 ```
 
