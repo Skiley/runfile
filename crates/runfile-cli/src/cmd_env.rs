@@ -1,6 +1,7 @@
 use crate::agent_detect;
 use runfile_settings::Settings;
 use std::collections::HashMap;
+use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::process;
 
@@ -291,9 +292,42 @@ pub fn cmd_get(file: &str, var: &str) {
 	}
 }
 
+/// Read a value from stdin (until EOF), stripping a single trailing newline.
+/// When stdin is a TTY, prints a usage hint to stderr first so users know the
+/// terminator is Ctrl+D (Unix) / Ctrl+Z then Enter (Windows).
+fn read_value_from_stdin() -> String {
+	let mut stdin = std::io::stdin();
+	if stdin.is_terminal() {
+		eprintln!("Enter value, then press Ctrl+D (Unix) or Ctrl+Z then Enter (Windows):");
+	}
+	let mut buf = String::new();
+	if let Err(e) = stdin.read_to_string(&mut buf) {
+		eprintln!("Error reading value from stdin: {e}");
+		process::exit(1);
+	}
+	if let Some(stripped) = buf.strip_suffix("\r\n") {
+		buf.truncate(stripped.len());
+	} else if let Some(stripped) = buf.strip_suffix('\n') {
+		buf.truncate(stripped.len());
+	}
+	buf
+}
+
 /// Set a variable in an env file. Auto-detects encryption and encrypts if needed.
 /// When `plain` is true, the value is stored as plaintext even if the file is encrypted.
-pub fn cmd_set(file: &str, var: &str, value: &str, plain: bool) {
+/// When `value` is `None`, the value is read from stdin (until EOF), with a single
+/// trailing newline stripped — useful to keep secrets out of shell history and to
+/// pass values containing shell-special characters without escaping.
+pub fn cmd_set(file: &str, var: &str, value: Option<&str>, plain: bool) {
+	let stdin_value;
+	let value = match value {
+		Some(v) => v,
+		None => {
+			stdin_value = read_value_from_stdin();
+			&stdin_value
+		}
+	};
+
 	let path = Path::new(file);
 	let content = if path.exists() {
 		read_file_content(file)

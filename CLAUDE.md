@@ -490,7 +490,9 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
 - Encryption key resolution order: `RUNFILE_ENCRYPTION_KEY` env var → auto-match `RUNFILE_ENCRYPTION_PUBLIC_KEY` against
   stored private keys → error. The env var allows CI/CD without local settings.
 - The `:env` subcommand operates on `.env` files: `init` (create new, optionally encrypted with `--plain`/`--key`
-  flags), `get` (auto-decrypts), `set` (auto-encrypts, `--plain` to skip encryption), `decrypt` (file→file), `encrypt` (
+  flags), `get` (auto-decrypts), `set` (auto-encrypts, `--plain` to skip encryption; `value` arg is optional — when
+  omitted, reads from stdin until EOF and strips a single trailing `\n`/`\r\n`, so secrets stay out of shell history
+  and shell-special characters like `$`/`!` need no escaping), `decrypt` (file→file), `encrypt` (
   file→file with public key prefix match), and `inject` (run a command with env vars from one or more `.env` files
   injected, à la `dotenvx run` — `-f <file>` repeatable, defaults to `.env`, encrypted values auto-decrypted in
   memory, command runs after `--`, `RUNFILE_ENCRYPTION_PUBLIC_KEY` is stripped before injection, the child's exit

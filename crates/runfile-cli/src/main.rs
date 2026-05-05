@@ -316,14 +316,17 @@ enum EnvAction {
 		#[command(subcommand)]
 		action: SecretKeysAction,
 	},
-	/// Set a variable in an env file (auto-encrypts if file is encrypted)
+	/// Set a variable in an env file (auto-encrypts if file is encrypted).
+	/// If VALUE is omitted, the value is read from stdin (until EOF) — useful
+	/// for keeping secrets out of shell history and for passing values that
+	/// contain shell-special characters like `$` or `!` without escaping.
 	Set {
 		/// Path to the .env file
 		file: String,
 		/// Variable name
 		var: String,
-		/// Value to set
-		value: String,
+		/// Value to set (omit to read from stdin)
+		value: Option<String>,
 		/// Store the value as plaintext even if the file is encrypted
 		#[arg(long = "plain")]
 		plain: bool,
@@ -467,7 +470,7 @@ fn main() {
 				var,
 				value,
 				plain,
-			} => cmd_env::cmd_set(&file, &var, &value, plain),
+			} => cmd_env::cmd_set(&file, &var, value.as_deref(), plain),
 			EnvAction::Decrypt { source, output } => cmd_env::cmd_decrypt_file(&source, output.as_deref()),
 			EnvAction::Encrypt {
 				source,

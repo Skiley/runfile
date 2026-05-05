@@ -922,8 +922,30 @@ fn cli_parses_env_set_plain() {
 		}) => {
 			assert_eq!(file, "file");
 			assert_eq!(var, "VAR");
-			assert_eq!(value, "val");
+			assert_eq!(value.as_deref(), Some("val"));
 			assert!(plain);
+		}
+		_ => panic!("expected Env Set"),
+	}
+}
+
+#[test]
+fn cli_parses_env_set_without_value() {
+	// When VALUE is omitted, it parses as None and the runtime reads from stdin.
+	let cli = Cli::try_parse_from(["run", ":env", "set", "file", "VAR"]).unwrap();
+	match cli.subcommand {
+		Some(crate::Commands::Env {
+			action: crate::EnvAction::Set {
+				file,
+				var,
+				value,
+				plain,
+			},
+		}) => {
+			assert_eq!(file, "file");
+			assert_eq!(var, "VAR");
+			assert_eq!(value, None);
+			assert!(!plain);
 		}
 		_ => panic!("expected Env Set"),
 	}

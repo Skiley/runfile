@@ -148,6 +148,7 @@ tool, no wrapper.
 ```bash
 $ run :env init -p .env.production
 $ run :env set .env.production DB_PASS "s3cr3t"   # auto-encrypted
+$ run :env set .env.production DB_PASS            # omit value → read from stdin (no shell history, no escaping)
 ```
 
 ```bash
