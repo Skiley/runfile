@@ -29,7 +29,7 @@ $ run dev --port=4000
           "then": "wsl --shell-type login -- vite build"
         }
       ],
-      "envFiles": [".env", ".env.$(ARGS.env ? development)"]
+      "envFiles": [".env", ".env.$(ARGS.env ? development)"],
       "parallel": true
     },
     "type-check": {
