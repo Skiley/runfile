@@ -2199,7 +2199,8 @@ $ run :generate vscode-tasks
 
 Generates (or updates) `.vscode/tasks.json` with one task per Runfile target. Existing user-added fields are preserved
 on update. Targets that use `$(ARGS)` patterns get an `${input:args}` variable appended so VS Code prompts for
-arguments.
+arguments. Every generated task is invoked with `--stdin-args` so any unsupplied `$(ARGS.x)` / `$(ENV.X)` /
+`$(FLAGS.x)` value is prompted in the integrated terminal at run time.
 
 ### Zed
 
@@ -2208,7 +2209,9 @@ $ run :generate zed-tasks
 ```
 
 Generates (or updates) `.zed/tasks.json` with one task per Runfile target. Existing user-added fields are preserved on
-update. Targets that use `$(ARGS)` get `$ZED_CUSTOM_ARGS` appended so Zed prompts for arguments.
+update. Targets that use `$(ARGS)` get `$ZED_CUSTOM_ARGS` appended so Zed prompts for arguments. Every generated task
+is invoked with `--stdin-args` so any unsupplied `$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)` value is prompted in the Zed
+terminal at run time.
 
 ### JetBrains (IntelliJ, CLion, RustRover, WebStorm, etc.)
 
@@ -2217,7 +2220,10 @@ $ run :generate jetbrains-run-configurations
 ```
 
 Generates Shell Script run configurations (one `.xml` file per target) in the `.run/` directory. Each configuration runs
-`run <target>` with the working directory set to `$PROJECT_DIR$`.
+`run --stdin-args <target>` with the working directory set to `$PROJECT_DIR$` and `EXECUTE_IN_TERMINAL=true` — JetBrains
+run configs are static (no per-invocation parameter UI), so `--stdin-args` makes the IDE's integrated terminal prompt
+for any unsupplied `$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)` value, and the terminal mode is what attaches stdin so the
+prompts can be answered. Re-generating upgrades configs created by older Runfile versions in place.
 
 Options:
 

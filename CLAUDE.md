@@ -551,6 +551,14 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   on Windows require function pointers, not closures.
 - VS Code tasks generator (`run :generate vscode-tasks`) follows the same pattern as the Zed generator: generates
   `.vscode/tasks.json`, merges with existing files preserving user-added fields via `#[serde(flatten)]`.
+- All three editor generators (`vscode`, `zed`, `jetbrains-run-configurations`) inject `--stdin-args` into the
+  generated invocation. Editor run configs are static (no per-invocation arg prompt UI built into the IDE), so
+  `--stdin-args` is what lets a static config still cover targets that need user input — missing `$(ARGS.x)` /
+  `$(ENV.X)` / `$(FLAGS.x)` values are prompted in the editor's integrated terminal at run time. JetBrains
+  additionally flips `EXECUTE_IN_TERMINAL` to `true` (default for `ShConfigurationType` is `false`, the
+  output-only Run/Services tool window — stdin would hit EOF and prompts would fail). VS Code and Zed always
+  run shell tasks in a terminal, so they only need the flag. `check_existing_jetbrains_config` accepts both the
+  current `run --stdin-args <target>` form and the legacy `run <target>` form so older configs upgrade in place.
 
 ## Testing Requirements
 

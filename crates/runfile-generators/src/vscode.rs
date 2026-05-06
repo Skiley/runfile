@@ -93,7 +93,12 @@ fn build_vscode_task(label: &str, target_name: &str, spec: &CommandSpec) -> VsCo
 		}
 	});
 
-	let mut args = vec![target_name.to_string()];
+	// `--stdin-args` lets the user fill in any unsupplied $(ARGS.x) /
+	// $(ENV.X) / $(FLAGS.x) value at the integrated terminal prompt. It
+	// composes with `${input:args}` (which still works for callers who
+	// already know what to pass): provided values skip the prompt, missing
+	// ones fire it. No-op when nothing's missing.
+	let mut args = vec!["--stdin-args".to_string(), target_name.to_string()];
 	if uses_args {
 		args.push("${input:args}".to_string());
 	}

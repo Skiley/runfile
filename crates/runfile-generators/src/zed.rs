@@ -76,7 +76,12 @@ fn build_zed_task(label: &str, target_name: &str, spec: &CommandSpec) -> ZedTask
 		}
 	});
 
-	let mut args = vec![target_name.to_string()];
+	// `--stdin-args` lets the user fill in any unsupplied $(ARGS.x) /
+	// $(ENV.X) / $(FLAGS.x) value at the Zed terminal prompt. It composes
+	// with `$ZED_CUSTOM_ARGS` (still respected for callers who know what to
+	// pass): provided values skip the prompt, missing ones fire it. No-op
+	// when nothing's missing.
+	let mut args = vec!["--stdin-args".to_string(), target_name.to_string()];
 	if uses_args {
 		args.push("$ZED_CUSTOM_ARGS".to_string());
 	}
