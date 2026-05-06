@@ -201,6 +201,13 @@ crates/
 
 - `RunArgs`: parses CLI args into positional (`$(ARGS)`) and named (`--key=value`). Carries a `run_context: RunContext`
   field used to resolve `$(RUN.*)` substitutions; populated by the CLI via `RunArgs::parse(...).with_run_context(...)`.
+  Also carries an optional `stdin_prompter: Option<Arc<dyn StdinPrompter>>` — when set (top-level CLI flag
+  `--stdin-args`), missing `$(ARGS.*)` / `$(ENV.*)` / `$(FLAGS.*)` references trigger a stdin prompt instead of
+  erroring. The prompter trait lives in `args.rs` alongside `InteractiveStdinPrompter` (the default impl that
+  reads stdin, writes prompts to stderr, and caches answers in `Mutex<HashMap>`s). `Arc` cloning shares the
+  cache, so the prompter propagates through `@target` calls (via `RunnerDependencyResolver::run_dependency`,
+  which clones `parent.stdin_prompter`) without re-asking the user. Tests use a mock `StdinPrompter` to script
+  scripted answers.
 - `substitute()` returns `Result` — `$(ARGS.key)` without `?` errors if arg is missing; `$(ARGS.key ?)` with empty
   right-side defaults to empty string; `$(ARGS.key ? default)` uses the default. Unknown `$(...)` heads
   (e.g. a shell command sub like `$(echo …)`) are re-emitted with their `$(...)` wrapper intact, but the substituter
@@ -427,6 +434,15 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   autocomplete.
 - Substitution (`$(ARGS.key)` without default) is a hard error, not silent empty string. This catches mistakes. Use
   `$(ARGS.key ?)` for intentional optional-with-empty-default.
+- `--stdin-args` (top-level CLI flag, like `--dry-run`): when set, missing `$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)`
+  references prompt the user via stdin instead of erroring. The prompt key is the FIRST `ARGS.*` / `ENV.*` segment in
+  the chain (the user-facing "primary name"); the chain's literal default (if any) is shown in `[brackets]`. A
+  non-empty answer overrides the chain; an empty answer (just Enter) falls through to the default — or to the
+  existing `MissingArg`/`MissingEnv` error if no default exists. `LOOP.*` and `RUN.*` are NEVER prompted (they're
+  runtime context, not user input). `FLAGS.x` prompts as `pass --x? (y/N)` and accepts `y`/`yes`/`true`/`1` as
+  presence. Answers are cached per (kind, key) so the same value is asked at most once per run, even across
+  `@target` invocations (the `Arc<dyn StdinPrompter>` is propagated through `RunnerDependencyResolver`). Works with
+  `--dry-run` too (the dry-run path also goes through `RunArgs::substitute`).
 - Runtime context substitutions: `$(RUN.os)` / `$(RUN.shell)` expose the OS and the resolved shell so users
   can write inline `if` conditions for cross-platform branching (e.g. `"if": "$(RUN.os) == windows"`).
   Unknown RUN keys are a hard error. RUN values are not redacted by `substitute_redacted` (they aren't

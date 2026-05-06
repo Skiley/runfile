@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -126,6 +127,101 @@ impl LoopScope {
 	}
 }
 
+/// Prompts the user for missing substitution values when `--stdin-args` is
+/// enabled. The interactive impl reads from stdin; tests substitute a mock.
+///
+/// Implementations MUST cache their answers internally — `prompt_value` and
+/// `prompt_flag` may be called many times for the same key (once per
+/// substitution site, plus once per redacted-logging pass), and asking the
+/// user the same thing twice is a poor UX. The cache is also what lets a
+/// shared prompter (cloned via `Arc`) propagate prompted values into nested
+/// `@target` invocations without re-prompting.
+pub trait StdinPrompter: Send + Sync + std::fmt::Debug {
+	/// Prompt for a substitution value. `key` identifies the source (e.g.
+	/// `"ARGS.foo"`, `"ENV.HOST"`); `default`, when `Some`, is shown to the
+	/// user and indicates that an empty response should fall through to the
+	/// chain default. Returns `Some(value)` if the user supplied a non-empty
+	/// answer (overrides the chain), or `None` if the answer was empty
+	/// (caller falls through to the next chain segment / default / error).
+	fn prompt_value(&self, key: &str, default: Option<&str>) -> Option<String>;
+
+	/// Prompt for a CLI flag (`$(FLAGS.x)`). Returns `true` if the flag
+	/// should be considered present, `false` otherwise.
+	fn prompt_flag(&self, key: &str) -> bool;
+}
+
+/// Default `StdinPrompter` impl: reads from stdin, writes prompts to stderr,
+/// caches answers in process memory. Cloning via `Arc` shares the cache —
+/// nested `@target` invocations re-use prompted values rather than re-asking.
+#[derive(Debug, Default)]
+pub struct InteractiveStdinPrompter {
+	value_cache: Mutex<HashMap<String, String>>,
+	flag_cache: Mutex<HashMap<String, bool>>,
+}
+
+impl InteractiveStdinPrompter {
+	pub fn new() -> Self {
+		Self::default()
+	}
+}
+
+impl StdinPrompter for InteractiveStdinPrompter {
+	fn prompt_value(&self, key: &str, default: Option<&str>) -> Option<String> {
+		{
+			let cache = self.value_cache.lock().unwrap();
+			if let Some(cached) = cache.get(key) {
+				return if cached.is_empty() { None } else { Some(cached.clone()) };
+			}
+		}
+
+		let suffix = match default {
+			Some("") => " \x1b[2m[empty]\x1b[0m: ".to_string(),
+			Some(d) => format!(" \x1b[2m[{}]\x1b[0m: ", d),
+			None => " \x1b[2m(required)\x1b[0m: ".to_string(),
+		};
+		eprint!("\x1b[1m\x1b[36m[runfile]\x1b[0m enter \x1b[1m{}{}", key, suffix);
+		let _ = std::io::stderr().flush();
+
+		let mut input = String::new();
+		let _ = std::io::stdin().read_line(&mut input);
+		let trimmed = input.trim_end_matches(['\n', '\r']).to_string();
+
+		self.value_cache
+			.lock()
+			.unwrap()
+			.insert(key.to_string(), trimmed.clone());
+
+		if trimmed.is_empty() {
+			None
+		} else {
+			Some(trimmed)
+		}
+	}
+
+	fn prompt_flag(&self, key: &str) -> bool {
+		{
+			let cache = self.flag_cache.lock().unwrap();
+			if let Some(&cached) = cache.get(key) {
+				return cached;
+			}
+		}
+
+		eprint!(
+			"\x1b[1m\x1b[36m[runfile]\x1b[0m pass \x1b[1m{}\x1b[0m? \x1b[2m(y/N)\x1b[0m: ",
+			key
+		);
+		let _ = std::io::stderr().flush();
+
+		let mut input = String::new();
+		let _ = std::io::stdin().read_line(&mut input);
+		let answer = input.trim().to_lowercase();
+		let value = matches!(answer.as_str(), "y" | "yes" | "true" | "1");
+
+		self.flag_cache.lock().unwrap().insert(key.to_string(), value);
+		value
+	}
+}
+
 /// Check for duplicate env var keys with different casing.
 /// Delegates to `runfile_env::check_env_case_duplicates` and converts the error type.
 pub fn check_env_case_duplicates(env: &HashMap<String, String>) -> Result<(), SubstitutionError> {
@@ -148,6 +244,12 @@ pub struct RunArgs {
 	/// empty — callers (the CLI, the runner) overwrite this with the actual
 	/// values once the shell has been resolved.
 	pub run_context: RunContext,
+	/// When `Some`, missing `$(ARGS.*)` / `$(ENV.*)` / `$(FLAGS.*)` references
+	/// are prompted via this prompter instead of erroring. Cloning a
+	/// `RunArgs` shares the same prompter (and therefore the same answer
+	/// cache) — propagated through `@target` invocations so the user is not
+	/// re-asked for the same value.
+	pub stdin_prompter: Option<Arc<dyn StdinPrompter>>,
 }
 
 impl RunArgs {
@@ -185,6 +287,7 @@ impl RunArgs {
 				os: detect_current_os().to_string(),
 				..Default::default()
 			},
+			stdin_prompter: None,
 		}
 	}
 
@@ -192,6 +295,14 @@ impl RunArgs {
 	/// Returns the modified args by value so it composes with [`RunArgs::parse`].
 	pub fn with_run_context(mut self, run_context: RunContext) -> Self {
 		self.run_context = run_context;
+		self
+	}
+
+	/// Builder: attach a [`StdinPrompter`]. Pass `None` to keep the existing
+	/// fail-on-missing behaviour. Composes with [`RunArgs::parse`] /
+	/// [`RunArgs::with_run_context`].
+	pub fn with_stdin_prompter(mut self, prompter: Option<Arc<dyn StdinPrompter>>) -> Self {
+		self.stdin_prompter = prompter;
 		self
 	}
 
@@ -255,6 +366,10 @@ impl RunArgs {
 		Ok(output)
 	}
 
+	fn prompter(&self) -> Option<&dyn StdinPrompter> {
+		self.stdin_prompter.as_deref()
+	}
+
 	/// Resolve all $(...) placeholders that start with ARGS., FLAGS., ENV., or LOOP.
 	/// When `redact_env` is true, resolved `$(ENV.*)` values are replaced with `***`.
 	fn resolve_placeholders_impl(
@@ -291,7 +406,7 @@ impl RunArgs {
 					// Leave $(ARGS) for the second pass
 					output.push_str("$(ARGS)");
 				} else if trimmed.starts_with("FLAGS.") {
-					let resolved = resolve_flag(trimmed, &self.named, consumed, flag_keys)?;
+					let resolved = resolve_flag(trimmed, &self.named, consumed, flag_keys, self.prompter())?;
 					output.push_str(&resolved);
 				} else if trimmed.starts_with("ARGS.")
 					|| trimmed.starts_with("ENV.")
@@ -306,6 +421,7 @@ impl RunArgs {
 						&self.run_context,
 						consumed,
 						redact_env,
+						self.prompter(),
 					)?;
 					output.push_str(&resolved);
 				} else {
@@ -384,6 +500,16 @@ impl RunArgs {
 /// `RUN.<unknown>` with no `?` after it, it's an error if the value is missing.
 ///
 /// When `redact_env` is true, resolved ENV values are replaced with `***`.
+///
+/// When `prompter` is `Some` (the caller passed `--stdin-args`), missing
+/// `ARGS.*` / `ENV.*` references trigger a stdin prompt instead of an
+/// immediate error. The prompt key is the FIRST `ARGS.*` / `ENV.*` segment
+/// in the chain (the user-facing "primary name"); the prompt's default-hint
+/// is the literal default segment if any. A non-empty answer overrides the
+/// chain; an empty answer falls through to the chain's default (or to the
+/// last source's missing-value error). `LOOP.*` and `RUN.*` are never
+/// prompted — they are runtime context, not user input.
+#[allow(clippy::too_many_arguments)]
 fn resolve_chain_impl(
 	expr: &str,
 	named_args: &HashMap<String, String>,
@@ -392,8 +518,12 @@ fn resolve_chain_impl(
 	run_context: &RunContext,
 	consumed: &mut HashSet<String>,
 	redact_env: bool,
+	prompter: Option<&dyn StdinPrompter>,
 ) -> Result<String, SubstitutionError> {
 	let segments: Vec<&str> = expr.splitn(usize::MAX, '?').collect();
+
+	let mut last_error: Option<SubstitutionError> = None;
+	let mut prompt_key: Option<String> = None;
 
 	for (i, segment) in segments.iter().enumerate() {
 		let seg = segment.trim();
@@ -405,38 +535,63 @@ fn resolve_chain_impl(
 				consumed.insert(key.to_string());
 				return Ok(val.clone());
 			}
-			if is_last {
-				return Err(SubstitutionError::MissingArg(key.to_string()));
+			if prompter.is_some() && prompt_key.is_none() {
+				prompt_key = Some(format!("ARGS.{}", key));
 			}
+			last_error = Some(SubstitutionError::MissingArg(key.to_string()));
 		} else if let Some(key) = seg.strip_prefix("ENV.") {
 			let key = key.trim();
 			if let Some(val) = env_get_case_insensitive(env, key) {
 				return Ok(if redact_env { "***".to_string() } else { val.to_string() });
 			}
-			if is_last {
-				return Err(SubstitutionError::MissingEnv(key.to_string()));
+			if prompter.is_some() && prompt_key.is_none() {
+				prompt_key = Some(format!("ENV.{}", key));
 			}
+			last_error = Some(SubstitutionError::MissingEnv(key.to_string()));
 		} else if let Some(key) = seg.strip_prefix("LOOP.") {
 			let key = key.trim();
 			if let Some(val) = loop_scope.get(key) {
 				return Ok(val.to_string());
 			}
 			if is_last {
-				return Err(SubstitutionError::MissingLoopVar(key.to_string()));
+				last_error = Some(SubstitutionError::MissingLoopVar(key.to_string()));
 			}
 		} else if let Some(key) = seg.strip_prefix("RUN.") {
 			let key = key.trim();
 			match resolve_run_key(key, run_context) {
 				Some(val) => return Ok(val),
-				None if is_last => return Err(SubstitutionError::UnknownRunKey(key.to_string())),
+				None if is_last => {
+					last_error = Some(SubstitutionError::UnknownRunKey(key.to_string()));
+				}
 				None => continue,
 			}
 		} else {
+			// Literal default segment. With `--stdin-args`, prompt FIRST so
+			// the user can override the default; an empty answer falls
+			// through to the default itself.
+			if let (Some(p), Some(pk)) = (prompter, &prompt_key) {
+				if let Some(val) = p.prompt_value(pk, Some(seg)) {
+					return Ok(val);
+				}
+			}
 			return Ok(seg.to_string());
 		}
 	}
 
-	Ok(String::new())
+	// No literal default reached. With `--stdin-args`, give the user one last
+	// chance to supply a value; an empty answer falls through to the chain's
+	// missing-value error.
+	if let (Some(p), Some(pk)) = (prompter, &prompt_key) {
+		if let Some(val) = p.prompt_value(pk, None) {
+			return Ok(val);
+		}
+	}
+
+	if let Some(err) = last_error {
+		Err(err)
+	} else {
+		Ok(String::new())
+	}
 }
 
 /// Resolve a single `RUN.<key>` lookup against the [`RunContext`].
@@ -464,6 +619,7 @@ fn resolve_flag(
 	named_args: &HashMap<String, String>,
 	consumed: &mut HashSet<String>,
 	flag_keys: &mut HashSet<String>,
+	prompter: Option<&dyn StdinPrompter>,
 ) -> Result<String, SubstitutionError> {
 	let after_prefix = expr.strip_prefix("FLAGS.").unwrap(); // caller checked prefix
 
@@ -478,7 +634,12 @@ fn resolve_flag(
 		return Ok(format!("$({})", expr));
 	}
 
-	let is_present = named_args.contains_key(key_part);
+	let mut is_present = named_args.contains_key(key_part);
+	if !is_present {
+		if let Some(p) = prompter {
+			is_present = p.prompt_flag(&format!("--{}", key_part));
+		}
+	}
 	consumed.insert(key_part.to_string());
 	flag_keys.insert(key_part.to_string());
 

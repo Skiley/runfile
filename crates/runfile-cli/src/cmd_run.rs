@@ -1,5 +1,6 @@
 use runfile_executor::{
-	extract_target_with_cwd, format_extracted_commands, log_total_timing, run_target_with_cwd, RunArgs, RunContext,
+	extract_target_with_cwd, format_extracted_commands, log_total_timing, run_target_with_cwd,
+	InteractiveStdinPrompter, RunArgs, RunContext, StdinPrompter,
 };
 use runfile_parser::{is_internal_target_name, CommandSpec, Runfile, SourceKind};
 use runfile_settings::Settings;
@@ -7,6 +8,7 @@ use runfile_shell::ResolvedShell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::process;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::agent_detect;
@@ -31,6 +33,7 @@ fn resolve_target_setup(
 	extra_args: &[String],
 	file: Option<&std::path::Path>,
 	cli_shell: Option<&str>,
+	stdin_args: bool,
 ) -> ResolvedTarget {
 	let merge_result = resolve_and_merge(file);
 	let runfile_dir = local_dir_from_merge(&merge_result);
@@ -64,7 +67,14 @@ fn resolve_target_setup(
 		resolve_shell_for_runfile(spec.force_shell.as_deref(), &settings)
 	};
 
-	let args = RunArgs::parse(extra_args).with_run_context(RunContext::new(shell.kind.name()));
+	let prompter: Option<Arc<dyn StdinPrompter>> = if stdin_args {
+		Some(Arc::new(InteractiveStdinPrompter::new()))
+	} else {
+		None
+	};
+	let args = RunArgs::parse(extra_args)
+		.with_run_context(RunContext::new(shell.kind.name()))
+		.with_stdin_prompter(prompter);
 
 	ResolvedTarget {
 		resolved_name,
@@ -236,13 +246,14 @@ pub fn cmd_run(
 	cli_shell: Option<&str>,
 	timings: bool,
 	yes: bool,
+	stdin_args: bool,
 ) {
-	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell);
+	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell, stdin_args);
 
 	// If the target defines watch patterns, automatically enter watch mode
 	let spec = &rt.runfile.targets[&rt.resolved_name];
 	if spec.watch.as_ref().is_some_and(|p| !p.is_empty()) {
-		return cmd_watch(target_name, extra_args, file, cli_shell, timings, yes);
+		return cmd_watch(target_name, extra_args, file, cli_shell, timings, yes, stdin_args);
 	}
 
 	let private_keys = rt.settings.resolve_private_keys();
@@ -291,10 +302,16 @@ pub fn cmd_run(
 	}
 }
 
-pub fn cmd_dry_run(target_name: &str, extra_args: &[String], file: Option<&std::path::Path>, cli_shell: Option<&str>) {
+pub fn cmd_dry_run(
+	target_name: &str,
+	extra_args: &[String],
+	file: Option<&std::path::Path>,
+	cli_shell: Option<&str>,
+	stdin_args: bool,
+) {
 	agent_detect::refuse_if_agent("dry-run a target");
 
-	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell);
+	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell, stdin_args);
 
 	match extract_target_with_cwd(
 		&rt.resolved_name,
@@ -324,6 +341,7 @@ pub fn cmd_watch(
 	cli_shell: Option<&str>,
 	timings: bool,
 	yes: bool,
+	stdin_args: bool,
 ) {
 	use globset::{Glob, GlobSetBuilder};
 	use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -335,7 +353,7 @@ pub fn cmd_watch(
 	const CYAN: &str = "\x1b[36m";
 	const DIM: &str = "\x1b[2m";
 
-	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell);
+	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell, stdin_args);
 
 	let spec = &rt.runfile.targets[&rt.resolved_name];
 	let watch_patterns = match &spec.watch {

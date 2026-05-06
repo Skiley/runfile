@@ -26,6 +26,13 @@ pub struct Cli {
 	#[arg(long = "dry-run")]
 	dry_run: bool,
 
+	/// Prompt for any missing $(ARGS.x) / $(ENV.X) / $(FLAGS.x) values via stdin
+	/// instead of failing. Substitutions with defaults are also prompted —
+	/// pressing Enter accepts the default; required values without a default
+	/// must be supplied or the run fails.
+	#[arg(long = "stdin-args")]
+	stdin_args: bool,
+
 	/// Path to a specific Runfile to use instead of auto-discovery
 	#[arg(short = 'f', long = "file")]
 	file: Option<PathBuf>,
@@ -493,7 +500,13 @@ fn main() {
 				let target_name = &cli.args[0];
 				let extra_args: Vec<String> = cli.args[1..].to_vec();
 				if cli.dry_run {
-					cmd_run::cmd_dry_run(target_name, &extra_args, cli.file.as_deref(), cli.shell.as_deref());
+					cmd_run::cmd_dry_run(
+						target_name,
+						&extra_args,
+						cli.file.as_deref(),
+						cli.shell.as_deref(),
+						cli.stdin_args,
+					);
 				} else {
 					cmd_run::cmd_run(
 						target_name,
@@ -502,6 +515,7 @@ fn main() {
 						cli.shell.as_deref(),
 						cli.timings,
 						cli.yes,
+						cli.stdin_args,
 					);
 				}
 			}

@@ -186,6 +186,7 @@ $ run dev --port=4000           # Named arguments
 | `--timings`              | Print per-target and per-command execution times to stderr                                                         |
 | `-y`, `--yes`            | Skip confirmation prompts (same as CI auto-skip)                                                                   |
 | `--dry-run`              | Show what would be executed without running anything (like `make -n`)                                              |
+| `--stdin-args`           | Prompt via stdin for any missing `$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)` values instead of failing                 |
 | `--version`              | Print version                                                                                                      |
 | `--help`                 | Print help                                                                                                         |
 
@@ -430,6 +431,32 @@ $ run server --env=staging        # NODE_ENV=staging (from ARGS)
 $ NODE_ENV=production run server  # NODE_ENV=production (from ENV)
 $ run server                      # NODE_ENV=development (literal default)
 ```
+
+### Interactive prompts — `--stdin-args`
+
+The `--stdin-args` flag (placed before the target name, like `--dry-run`) prompts via stdin for any missing
+`$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)` reference instead of failing. Substitutions with a literal default are
+also prompted: pressing Enter accepts the default; required values without a default must be supplied or the
+run errors as it would without the flag.
+
+```
+$ run --stdin-args server
+[runfile] enter ARGS.env [development]:        # Enter → uses "development"
+[runfile] pass --release? (y/N): y             # toggles $(FLAGS.release) to true
+```
+
+Resolution order with `--stdin-args` set:
+
+1. CLI args / env / FLAGS that were actually provided still win (no prompt).
+2. If nothing in the chain resolves, the user is prompted with the chain's literal default shown in
+   `[brackets]` (or `(required)` if no default exists).
+3. A non-empty answer overrides the chain.
+4. An empty answer falls through to the chain's default — or surfaces the existing
+   `MissingArg` / `MissingEnv` error if no default exists.
+
+`LOOP.*` and `RUN.*` are never prompted (they're runtime context). Answers are cached per `(kind, key)` so the
+same value is asked at most once per run, even across `@target` invocations. Works with `--dry-run` too — the
+dry-run path goes through the same substitution layer.
 
 ### Boolean flags — `$(FLAGS.key)`
 

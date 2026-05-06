@@ -113,8 +113,13 @@ impl DependencyResolver for RunnerDependencyResolver<'_> {
 		// Build a child RunArgs from the tokenized argv. We re-parse so
 		// `--key value` / `--key=value` / positional split is consistent with
 		// the CLI's parser, then re-attach the parent's run_context (the
-		// runner refreshes shell per-target downstream anyway).
-		let child_args = RunArgs::parse(&args).with_run_context(self.root.base_args.run_context.clone());
+		// runner refreshes shell per-target downstream anyway). The
+		// `--stdin-args` prompter (if any) is also propagated by `Arc` clone
+		// so prompted answers cached on the parent are reused inside the dep
+		// instead of re-asking the user.
+		let child_args = RunArgs::parse(&args)
+			.with_run_context(self.root.base_args.run_context.clone())
+			.with_stdin_prompter(self.root.base_args.stdin_prompter.clone());
 
 		// Dependency invocations don't dedup — every `@target` call runs.
 		// Cycle detection uses the per-call chain.
