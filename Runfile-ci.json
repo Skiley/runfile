@@ -4,6 +4,7 @@
 		"addToPath": [
 			"target/debug"
 		],
+		"forceShell": "sh",
 		"logging": true
 	},
 	"targets": {
@@ -37,17 +38,17 @@
 		},
 		"ci:package-archive": {
 			"description": "Package the built binary + README into a release archive (--target=<triple>). Produces stage/runfile-cli-<target>.{tar.xz|zip}.",
-			"forceShell": "bash",
 			"commands": [
 				"mkdir -p stage/runfile-cli-{{ ARGS.target }}",
 				{
-					"if": "{{ RUN.os }} == windows",
-					"then": "cp target/{{ ARGS.target }}/release/run.exe stage/runfile-cli-{{ ARGS.target }}/",
-					"else": "cp target/{{ ARGS.target }}/release/run stage/runfile-cli-{{ ARGS.target }}/"
+					"if": "{{ RUN.os == 'windows' }}",
+					"then": "{{ define(executable, 'run.exe') }}",
+					"else": "{{ define(executable, 'run') }}"
 				},
+				"cp target/{{ ARGS.target }}/release/{{ VARS.executable }} stage/runfile-cli-{{ ARGS.target }}/",
 				"cp README.md stage/runfile-cli-{{ ARGS.target }}/",
 				{
-					"if": "{{ RUN.os }} == windows",
+					"if": "{{ RUN.os == 'windows' }}",
 					"then": "cd stage && 7z a runfile-cli-{{ ARGS.target }}.zip runfile-cli-{{ ARGS.target }} > /dev/null",
 					"else": "cd stage && tar cJf runfile-cli-{{ ARGS.target }}.tar.xz runfile-cli-{{ ARGS.target }}"
 				}
@@ -55,7 +56,6 @@
 		},
 		"ci:stage-release-assets": {
 			"description": "Copy install scripts + JSON Schema into assets/ and generate sha256.sum",
-			"forceShell": "bash",
 			"commands": [
 				"cp scripts/install.sh assets/install.sh",
 				"cp scripts/install.ps1 assets/install.ps1",
@@ -65,7 +65,6 @@
 		},
 		"ci:create-release": {
 			"description": "Create the GitHub Release with all staged assets (--tag=<vX.Y.Z>). Requires GH_TOKEN and GITHUB_REPOSITORY in env.",
-			"forceShell": "bash",
 			"commands": "gh release create \"{{ ARGS.tag }}\" --repo \"{{ ENV.GITHUB_REPOSITORY }}\" --title \"{{ ARGS.tag }}\" --generate-notes assets/*"
 		},
 		"ci:build-npm-packages": {
@@ -74,7 +73,6 @@
 		},
 		"ci:publish-npm": {
 			"description": "Publish all per-platform npm packages, then the wrapper package. Requires NODE_AUTH_TOKEN in env.",
-			"forceShell": "bash",
 			"commands": [
 				"for dir in npm-dist/runfile-*; do (cd \"$dir\" && npm publish --access public --provenance) || exit 1; done",
 				"cd npm-dist/runfile && npm publish --access public --provenance"

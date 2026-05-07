@@ -18,7 +18,7 @@
 			"commands": [
 				"cargo build {{ ARGS }}",
 				{
-					"if": "{{ RUN.os }} == windows",
+					"if": "{{ RUN.os == 'windows' }}",
 					"then": "@wsl:build"
 				},
 				"@install"
@@ -29,7 +29,7 @@
 			"commands": [
 				"cargo build --release {{ ARGS }}",
 				{
-					"if": "{{ RUN.os }} == windows",
+					"if": "{{ RUN.os == 'windows' }}",
 					"then": "@wsl:build:release"
 				}
 			]
@@ -45,7 +45,7 @@
 						"-mac",
 						"-windows"
 					],
-					"do": "cargo clean --target-dir target{{ LOOP.dir }}"
+					"do": "cargo clean --target-dir target{{ VARS.dir }}"
 				}
 			]
 		},
@@ -53,10 +53,11 @@
 			"description": "Copies the built binary to .local/bin",
 			"commands": [
 				{
-					"if": "{{ RUN.os }} == windows",
-					"then": "cp target-windows/debug/run.exe ~/.local/bin/run.exe",
-					"else": "cp {{ ENV.CARGO_TARGET_DIR }}/debug/run ~/.local/bin/run"
-				}
+					"if": "{{ RUN.os == 'windows' }}",
+					"then": "{{ define(executable, 'run.exe') }}",
+					"else": "{{ define(executable, 'run') }}"
+				},
+				"cp {{ ENV.CARGO_TARGET_DIR }}/debug/{{ VARS.executable }} ~/.local/bin/{{ VARS.executable }}"
 			],
 			"detach": true,
 			"forceShell": "sh",
@@ -69,7 +70,7 @@
 				"cargo fmt --all",
 				"cargo clippy --all-targets --all-features -- -D warnings",
 				{
-					"if": "{{ RUN.os }} == windows",
+					"if": "{{ RUN.os == 'windows' }}",
 					"then": "@wsl:lint"
 				}
 			]
@@ -79,7 +80,7 @@
 			"commands": [
 				"cargo test {{ ARGS }}",
 				{
-					"if": "{{ RUN.os }} == windows",
+					"if": "{{ RUN.os == 'windows' }}",
 					"then": "@wsl:test"
 				}
 			]
