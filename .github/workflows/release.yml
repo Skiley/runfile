@@ -40,6 +40,7 @@ jobs:
           key: ${{ matrix.target }}
       - uses: ./.github/actions/setup
         with:
+          from-source: true
           global-files: Runfile-ci.json
       - if: contains(matrix.target, 'linux-musl')
         run: run ci:install-musl-tools
@@ -71,6 +72,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
       - uses: ./.github/actions/setup
         with:
+          from-source: true
           global-files: Runfile-ci.json
       - run: run ci:stage-release-assets
       - run: run ci:create-release --tag="$TAG"
@@ -100,6 +102,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
       - uses: ./.github/actions/setup
         with:
+          from-source: true
           global-files: Runfile-ci.json
       - run: run ci:build-npm-packages --version="${TAG#v}"
       - run: run ci:publish-npm

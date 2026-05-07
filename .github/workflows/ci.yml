@@ -18,6 +18,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
       - uses: ./.github/actions/setup
         with:
+          from-source: true
           global-files: Runfile-ci.json
       - run: run ci:lint
 
@@ -35,5 +36,6 @@ jobs:
           key: ${{ matrix.os }}
       - uses: ./.github/actions/setup
         with:
+          from-source: true
           global-files: Runfile-ci.json
       - run: run ci:test

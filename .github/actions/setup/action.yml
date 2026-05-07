@@ -4,8 +4,15 @@ author: Skiley
 
 inputs:
   version:
-    description: 'Version to install. Defaults to latest.'
+    description: 'Version to install. Defaults to latest. Ignored when `from-source` is true.'
     default: latest
+  from-source:
+    description: |
+      If `true`, build runfile from the current checkout via `cargo build` and
+      add `target/debug` to PATH instead of downloading a release archive.
+      Used internally to test the working-tree version of the CLI; external
+      consumers should leave this unset.
+    default: 'false'
   secret-keys:
     description: |
       Optional newline-separated list of private encryption keys (one 64-char hex
@@ -28,6 +35,7 @@ runs:
   using: composite
   steps:
     - name: Resolve target
+      if: inputs.from-source != 'true'
       id: target
       shell: bash
       run: |
@@ -50,6 +58,7 @@ runs:
         echo "ext=${ext}" >> "$GITHUB_OUTPUT"
 
     - name: Install runfile
+      if: inputs.from-source != 'true'
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
@@ -77,6 +86,15 @@ runs:
         mv "$RUNNER_TEMP/runfile-cli-${TARGET}"/run* "$install_dir/"
         echo "$install_dir" >> "$GITHUB_PATH"
         "$install_dir"/run* --version
+
+    - name: Build runfile from source
+      if: inputs.from-source == 'true'
+      shell: bash
+      run: |
+        cargo build
+        bin_dir="$GITHUB_WORKSPACE/target/debug"
+        echo "$bin_dir" >> "$GITHUB_PATH"
+        "$bin_dir"/run* --version
 
     # Linux runners ship without a Secret Service daemon. The `keyring` crate's
     # linux-native backend talks to gnome-keyring over D-Bus, so we install both
