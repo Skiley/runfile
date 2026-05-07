@@ -34,13 +34,28 @@ pub fn load_env_files(
 /// addToPath chain (prepended to PATH) → decryption.
 /// If encrypted values are found, automatically resolves the decryption key via
 /// `RUNFILE_ENCRYPTION_KEY` env var or public key matching against `available_private_keys`.
+///
+/// `working_dir` is the resolved `workingDirectory` (used for relative
+/// `addToPath` entries and as the spawn dir). `env_files_base_dir` is the
+/// source Runfile's parent directory (`{{ RUN.parent }}`) — relative
+/// `envFiles` paths always resolve against this, regardless of
+/// `workingDirectory`.
 pub fn build_env(
 	command_spec: &CommandSpec,
 	working_dir: &Path,
+	env_files_base_dir: &Path,
 	args: &RunArgs,
 	available_private_keys: Option<&[String]>,
 ) -> Result<HashMap<String, String>, EnvFileError> {
-	build_env_with_base(command_spec, working_dir, args, available_private_keys, None, None)
+	build_env_with_base(
+		command_spec,
+		working_dir,
+		env_files_base_dir,
+		args,
+		available_private_keys,
+		None,
+		None,
+	)
 }
 
 /// Like [`build_env`] but lets the caller pass two pieces of ancestor state
@@ -51,9 +66,11 @@ pub fn build_env(
 ///   (outermost first). Re-prepended to PATH after the shell-env overlay so
 ///   the full chain reaches the dep's commands as
 ///   `[dep addToPath..., parent..., grandparent..., shell PATH]`.
+#[allow(clippy::too_many_arguments)]
 pub fn build_env_with_base(
 	command_spec: &CommandSpec,
 	working_dir: &Path,
+	env_files_base_dir: &Path,
 	args: &RunArgs,
 	available_private_keys: Option<&[String]>,
 	base_env: Option<&HashMap<String, String>>,
@@ -66,6 +83,7 @@ pub fn build_env_with_base(
 		env: command_env.as_ref(),
 		add_to_path: command_spec.add_to_path.as_deref(),
 		working_dir,
+		env_files_base_dir,
 		available_private_keys,
 		base_env,
 		parent_add_to_path_chain,

@@ -135,10 +135,12 @@ struct ExecSetup {
 }
 
 impl ExecSetup {
+	#[allow(clippy::too_many_arguments)]
 	fn new(
 		spec: &CommandSpec,
 		args: &RunArgs,
 		working_dir: &Path,
+		env_files_base_dir: &Path,
 		available_private_keys: Option<&[String]>,
 		parent_env: Option<&HashMap<String, String>>,
 		parent_add_to_path_chain: &[Vec<String>],
@@ -147,6 +149,7 @@ impl ExecSetup {
 		let env = build_env_with_base(
 			spec,
 			working_dir,
+			env_files_base_dir,
 			args,
 			available_private_keys,
 			parent_env,
@@ -227,10 +230,14 @@ pub fn execute_command(
 	timings: bool,
 ) -> Result<ExecutionResult, ExecuteError> {
 	let counter = StepCounter::new(count_leaves(&spec.commands));
+	// No separate Runfile context → reuse `working_dir` as the env-files base
+	// (matches the legacy single-base behaviour for callers that don't have a
+	// distinct Runfile parent dir, e.g. unit tests).
 	execute_command_with_counter(
 		spec,
 		shell,
 		args,
+		working_dir,
 		working_dir,
 		available_private_keys,
 		timings,
@@ -255,6 +262,7 @@ pub fn execute_command_with_counter(
 	shell: &ResolvedShell,
 	args: &RunArgs,
 	working_dir: &Path,
+	env_files_base_dir: &Path,
 	available_private_keys: Option<&[String]>,
 	timings: bool,
 	counter: &StepCounter,
@@ -267,6 +275,7 @@ pub fn execute_command_with_counter(
 		spec,
 		args,
 		working_dir,
+		env_files_base_dir,
 		available_private_keys,
 		parent_env,
 		parent_add_to_path_chain,
@@ -1591,6 +1600,7 @@ pub fn execute_parallel(
 		shell,
 		args,
 		working_dir,
+		working_dir,
 		available_private_keys,
 		timings,
 		&counter,
@@ -1609,6 +1619,7 @@ pub fn execute_parallel_with_counter(
 	shell: &ResolvedShell,
 	args: &RunArgs,
 	working_dir: &Path,
+	env_files_base_dir: &Path,
 	available_private_keys: Option<&[String]>,
 	_timings: bool,
 	counter: &StepCounter,
@@ -1621,6 +1632,7 @@ pub fn execute_parallel_with_counter(
 		spec,
 		args,
 		working_dir,
+		env_files_base_dir,
 		available_private_keys,
 		parent_env,
 		parent_add_to_path_chain,

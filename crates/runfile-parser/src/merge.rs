@@ -311,14 +311,33 @@ fn is_cwd_allowed(cwd: &Path, base_dir: &Path, only_dirs: &[String]) -> bool {
 	false
 }
 
-/// Bake a file's globals into a target's own fields.
-/// After baking, the target is self-contained and doesn't need its source globals.
+/// Bake a file's globals into a target's own fields, plus normalise any
+/// path-bearing target fields whose semantics anchor to the source Runfile's
+/// directory.
+///
+/// After baking, the target is self-contained: no globals reference, and
+/// every relative path in `addToPath` is resolved against `source_dir` so
+/// downstream code never has to know which file the target came from to
+/// resolve it. (Globals' addToPath entries get the same treatment for the
+/// same reason.) `envFiles` are NOT pre-baked here — they're substitution
+/// templates and are resolved at runtime against `env_files_base_dir`
+/// (= the target's source dir) inside the env builder.
 fn bake_globals_into_target(
 	mut spec: CommandSpec,
 	globals: Option<&Globals>,
 	source_dir: &Path,
 	_target_name: &str,
 ) -> CommandSpec {
+	// Always bake target's own addToPath entries to absolute. Relative paths
+	// resolve against the source Runfile's directory — same anchor as
+	// `{{ RUN.parent }}`, decoupled from the target's runtime
+	// `workingDirectory`.
+	if let Some(target_paths) = spec.add_to_path.as_mut() {
+		for p in target_paths.iter_mut() {
+			*p = make_path_absolute(p, source_dir);
+		}
+	}
+
 	let globals = match globals {
 		Some(g) => g,
 		None => return spec,
@@ -346,7 +365,8 @@ fn bake_globals_into_target(
 		spec.env_files = Some(merged);
 	}
 
-	// addToPath: prepend global (made absolute) before target
+	// addToPath: prepend global (made absolute) before target (also already
+	// made absolute above against the same `source_dir`).
 	if let Some(global_paths) = &globals.add_to_path {
 		let absolute_globals: Vec<String> = global_paths.iter().map(|p| make_path_absolute(p, source_dir)).collect();
 		let mut merged = absolute_globals;

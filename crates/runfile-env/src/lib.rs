@@ -41,10 +41,22 @@ pub struct EnvBuildParams<'a> {
 	pub env_files: Option<&'a [String]>,
 	/// Env vars to set (applied after env files).
 	pub env: Option<&'a HashMap<String, String>>,
-	/// Directories to prepend to PATH.
+	/// Directories to prepend to PATH. Entries should already be absolute —
+	/// the parser bakes target-level relative `addToPath` entries against the
+	/// source Runfile's directory in `merge.rs`, mirroring how globals are
+	/// baked. The `working_dir` fallback in `apply_add_to_path_chain` only
+	/// kicks in for any stray relative entry that bypassed baking.
 	pub add_to_path: Option<&'a [String]>,
-	/// Working directory for resolving relative paths.
+	/// Working directory the spawned command will run in (= the resolved
+	/// `workingDirectory`). Used as a fallback for any relative `addToPath`
+	/// entry that wasn't baked at parse time; not used for `envFiles`.
 	pub working_dir: &'a Path,
+	/// Base directory for resolving relative `envFiles` paths. Always the
+	/// source Runfile's parent directory (`{{ RUN.parent }}`), regardless of
+	/// `workingDirectory` — env files are configuration files co-located with
+	/// the Runfile, so anchoring them to the Runfile dir is what users expect
+	/// when they tweak `workingDirectory` for command execution.
+	pub env_files_base_dir: &'a Path,
 	/// Available private keys for decrypting `encrypted:` prefixed values.
 	/// After merging, if encrypted values are detected, the key is resolved by:
 	/// 1. `RUNFILE_ENCRYPTION_KEY` env var (for CI/CD)
@@ -151,9 +163,12 @@ pub fn build_env(
 		None => env::vars().collect(),
 	};
 
-	// Layer envFiles (substitution sees the env_map built so far).
+	// Layer envFiles (substitution sees the env_map built so far). Relative
+	// envFiles paths resolve against `env_files_base_dir` — the source
+	// Runfile's parent — NOT the resolved `workingDirectory`. Env files are
+	// configuration co-located with the Runfile.
 	if let Some(env_files) = params.env_files {
-		let file_vars = load_env_files(env_files, params.working_dir, substitute, &env_map)?;
+		let file_vars = load_env_files(env_files, params.env_files_base_dir, substitute, &env_map)?;
 		env_map.extend(file_vars);
 	}
 

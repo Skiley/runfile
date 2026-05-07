@@ -299,7 +299,14 @@ fn substitute_redacted_preserves_non_placeholder_text() {
 #[test]
 fn build_env_with_no_extras() {
 	let spec = CommandSpec::new(vec!["echo".into()]);
-	let env = build_env(&spec, &PathBuf::from("."), &RunArgs::default(), None).unwrap();
+	let env = build_env(
+		&spec,
+		&PathBuf::from("."),
+		&PathBuf::from("."),
+		&RunArgs::default(),
+		None,
+	)
+	.unwrap();
 	// Should at least contain system PATH (may be "Path" on Windows)
 	assert!(
 		env.keys().any(|k| k.eq_ignore_ascii_case("PATH")),
@@ -315,7 +322,14 @@ fn build_env_with_global_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(global_env);
 
-	let env = build_env(&spec, &PathBuf::from("."), &RunArgs::default(), None).unwrap();
+	let env = build_env(
+		&spec,
+		&PathBuf::from("."),
+		&PathBuf::from("."),
+		&RunArgs::default(),
+		None,
+	)
+	.unwrap();
 	assert_eq!(env.get("MY_VAR").unwrap(), "hello");
 }
 
@@ -327,7 +341,14 @@ fn build_env_command_overrides_global() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 
-	let env = build_env(&spec, &PathBuf::from("."), &RunArgs::default(), None).unwrap();
+	let env = build_env(
+		&spec,
+		&PathBuf::from("."),
+		&PathBuf::from("."),
+		&RunArgs::default(),
+		None,
+	)
+	.unwrap();
 	assert_eq!(env.get("PORT").unwrap(), "5000");
 }
 
@@ -337,7 +358,7 @@ fn build_env_add_to_path() {
 	spec.add_to_path = Some(vec!["node_modules/.bin".into()]);
 
 	let working_dir = PathBuf::from("/project");
-	let env = build_env(&spec, &working_dir, &RunArgs::default(), None).unwrap();
+	let env = build_env(&spec, &working_dir, &working_dir, &RunArgs::default(), None).unwrap();
 	let path = get_path_value(&env);
 
 	// The added path should be at the beginning (normalize for cross-platform)
@@ -353,7 +374,14 @@ fn build_env_add_to_path_absolute() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.add_to_path = Some(vec!["/usr/local/custom/bin".into()]);
 
-	let env = build_env(&spec, &PathBuf::from("/project"), &RunArgs::default(), None).unwrap();
+	let env = build_env(
+		&spec,
+		&PathBuf::from("/project"),
+		&PathBuf::from("/project"),
+		&RunArgs::default(),
+		None,
+	)
+	.unwrap();
 	let path = get_path_value(&env);
 	assert!(path.contains("/usr/local/custom/bin"));
 }
@@ -367,7 +395,7 @@ fn build_env_substitutes_args_in_target_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 	let args = RunArgs::parse(&["--port=4000".into()]);
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("PORT").unwrap(), "4000");
 }
 
@@ -378,7 +406,7 @@ fn build_env_substitutes_args_default_in_target_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 	let args = RunArgs::default();
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("PORT").unwrap(), "3000");
 }
 
@@ -392,7 +420,7 @@ fn build_env_substitutes_flags_in_target_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 	let args = RunArgs::parse(&["--debug".into()]);
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("NODE_OPTIONS").unwrap(), "--inspect");
 }
 
@@ -403,7 +431,7 @@ fn build_env_substitutes_flags_false_in_target_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 	let args = RunArgs::default();
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("DEBUG").unwrap(), "false");
 }
 
@@ -417,7 +445,7 @@ fn build_env_substitutes_args_in_global_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(global_env);
 	let args = RunArgs::parse(&["--env=staging".into()]);
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("ENV_NAME").unwrap(), "staging");
 }
 
@@ -428,7 +456,7 @@ fn build_env_substitutes_flags_in_global_env() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(global_env);
 	let args = RunArgs::parse(&["--verbose".into()]);
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("VERBOSE").unwrap(), "true");
 }
 
@@ -443,7 +471,7 @@ fn build_env_env_can_reference_system_env_via_substitution() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 	let args = RunArgs::default();
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	// PATH should exist in system env, so the substitution should use the real value
 	let path_copy = env.get("MY_PATH_COPY").unwrap();
 	assert_ne!(
@@ -461,7 +489,7 @@ fn build_env_non_string_env_values_not_substituted() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env = Some(cmd_env);
 	let args = RunArgs::default();
-	let env = build_env(&spec, &PathBuf::from("."), &args, None).unwrap();
+	let env = build_env(&spec, &PathBuf::from("."), &PathBuf::from("."), &args, None).unwrap();
 	assert_eq!(env.get("PORT").unwrap(), "8080");
 	assert_eq!(env.get("ENABLED").unwrap(), "true");
 }
@@ -778,7 +806,7 @@ fn build_env_command_add_to_path() {
 	spec.add_to_path = Some(vec!["my-tools/bin".into()]);
 
 	let working_dir = PathBuf::from("/project");
-	let env = build_env(&spec, &working_dir, &RunArgs::default(), None).unwrap();
+	let env = build_env(&spec, &working_dir, &working_dir, &RunArgs::default(), None).unwrap();
 	let path = get_path_value(&env);
 	let normalized = path.replace('\\', "/");
 	assert!(
@@ -793,7 +821,7 @@ fn build_env_command_add_to_path_before_global() {
 	spec.add_to_path = Some(vec!["cmd/bin".into(), "global/bin".into()]);
 
 	let working_dir = PathBuf::from("/project");
-	let env = build_env(&spec, &working_dir, &RunArgs::default(), None).unwrap();
+	let env = build_env(&spec, &working_dir, &working_dir, &RunArgs::default(), None).unwrap();
 	let path = get_path_value(&env);
 	let normalized = path.replace('\\', "/");
 
@@ -1835,6 +1863,158 @@ fn force_shell_accepts_substitution() {
 	let runfile = parse_runfile(json).unwrap();
 	let res = run_target("t", &runfile, &shell, &RunArgs::default(), dir.path()).unwrap();
 	assert!(res.final_status.success());
+}
+
+#[test]
+fn add_to_path_resolves_relative_to_runfile_parent_not_working_directory() {
+	// Regression: when a target sets `workingDirectory` to a subdir, relative
+	// `addToPath` entries must STILL resolve against the source Runfile's
+	// parent dir — not against the resolved workingDirectory. The parser
+	// bakes target-level addToPath against `source_dir` for this reason.
+	use crate::runner::run_target_with_cwd;
+	use runfile_parser::{merge_runfiles, parse_runfile};
+	use std::fs;
+
+	let shell = get_test_shell();
+	let runfile_dir = TempDir::new().unwrap();
+	let caller_cwd = TempDir::new().unwrap();
+	let nested = runfile_dir.path().join("subdir");
+	fs::create_dir(&nested).unwrap();
+	let tool_dir = runfile_dir.path().join("tools");
+	fs::create_dir(&tool_dir).unwrap();
+
+	let marker = nested.join("path-marker");
+	let marker_escaped = json_escape_path(&marker);
+	let write_path = if shell.kind == ShellKind::Cmd {
+		format!("echo %PATH%> \\\"{marker_escaped}\\\"")
+	} else {
+		format!("echo \\\"$PATH\\\" > \\\"{marker_escaped}\\\"")
+	};
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "targets": {{
+            "t": {{
+                "commands": ["{write_path}"],
+                "addToPath": ["tools"],
+                "workingDirectory": "subdir"
+            }}
+        }}
+    }}"#
+	);
+	let runfile_path = runfile_dir.path().join("Runfile.json");
+	fs::write(&runfile_path, &json).unwrap();
+
+	// Use the merge pipeline so target-level addToPath gets baked against
+	// `source_dir` (= runfile_dir) — same code path the CLI uses.
+	let parsed = parse_runfile(&json).unwrap();
+	let merge_result = merge_runfiles(Some((parsed, runfile_path.clone())), &[], runfile_dir.path()).unwrap();
+	let source_files = merge_result.source_files();
+	let runfile = merge_result.runfile;
+	let source_dirs = merge_result.source_dirs;
+
+	let args = RunArgs::default();
+	run_target_with_cwd(
+		"t",
+		&runfile,
+		&shell,
+		&args,
+		&runfile_path,
+		runfile_dir.path(),
+		caller_cwd.path(),
+		&source_dirs,
+		&source_files,
+		false,
+		false,
+		None,
+	)
+	.unwrap();
+
+	let written = fs::read_to_string(&marker).expect("path marker should exist in subdir/");
+	// Normalise backslashes — some shells (MSYS bash on Windows) emit POSIX-form
+	// paths in `$PATH`, so we can't compare against the absolute Windows form
+	// directly. The behavior we care about is "addToPath was anchored to the
+	// runfile parent": `tools` should appear in PATH as a direct child of the
+	// runfile parent, not nested under `subdir/`.
+	let normalised = written.replace('\\', "/");
+	assert!(
+		!normalised.contains("subdir/tools"),
+		"addToPath entry `tools` was wrongly resolved as a child of workingDirectory `subdir`. PATH was: {:?}",
+		written
+	);
+	assert!(
+		normalised.contains("/tools"),
+		"addToPath entry `tools` should appear in PATH (as `<runfile_parent>/tools`). PATH was: {:?}",
+		written
+	);
+}
+
+#[test]
+fn env_files_resolve_relative_to_runfile_parent_not_working_directory() {
+	// Regression: when a target sets `workingDirectory` to a subdir, relative
+	// `envFiles` paths must STILL resolve against the source Runfile's parent
+	// dir — not against the resolved workingDirectory. Env files are
+	// configuration co-located with the Runfile.
+	use crate::runner::run_target_with_cwd;
+	use runfile_parser::Runfile;
+	use std::fs;
+
+	let shell = get_test_shell();
+	let runfile_dir = TempDir::new().unwrap();
+	let caller_cwd = TempDir::new().unwrap();
+	let nested = runfile_dir.path().join("subdir");
+	fs::create_dir(&nested).unwrap();
+
+	// .env.production lives next to the Runfile (NOT inside `subdir/`).
+	fs::write(runfile_dir.path().join(".env.production"), "MY_TOKEN=from-envfile\n").unwrap();
+
+	let marker = nested.join("token");
+	let marker_escaped = json_escape_path(&marker);
+	let write_token = if shell.kind == ShellKind::Cmd {
+		format!("echo %MY_TOKEN%> \\\"{marker_escaped}\\\"")
+	} else {
+		format!("echo $MY_TOKEN > \\\"{marker_escaped}\\\"")
+	};
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "targets": {{
+            "t": {{
+                "commands": ["{write_token}"],
+                "envFiles": [".env.production"],
+                "workingDirectory": "subdir"
+            }}
+        }}
+    }}"#
+	);
+	let runfile: Runfile = serde_json::from_str(&json).unwrap();
+	let args = RunArgs::default();
+
+	let runfile_path = runfile_dir.path().join("Runfile.json");
+	run_target_with_cwd(
+		"t",
+		&runfile,
+		&shell,
+		&args,
+		&runfile_path,
+		runfile_dir.path(),
+		caller_cwd.path(),
+		&std::collections::HashMap::new(),
+		&std::collections::HashMap::new(),
+		false,
+		false,
+		None,
+	)
+	.unwrap();
+
+	let written = fs::read_to_string(&marker).expect("token marker should exist in subdir/");
+	assert!(
+		written.contains("from-envfile"),
+		"envFile from runfile parent should have loaded MY_TOKEN even when workingDirectory is `subdir`. got: {:?}",
+		written
+	);
 }
 
 // ── Extract tests ────────────────────────────────────────────────────
@@ -2907,7 +3087,7 @@ fn build_env_env_files_before_env() {
 	spec.env = Some(cmd_env);
 
 	// env (inline) should override envFiles
-	let env = build_env(&spec, dir.path(), &RunArgs::default(), None).unwrap();
+	let env = build_env(&spec, dir.path(), dir.path(), &RunArgs::default(), None).unwrap();
 	assert_eq!(env.get("KEY").unwrap(), "from_env");
 }
 
@@ -2919,7 +3099,7 @@ fn build_env_global_env_files() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env_files = Some(vec![".env".into()]);
 
-	let env = build_env(&spec, dir.path(), &RunArgs::default(), None).unwrap();
+	let env = build_env(&spec, dir.path(), dir.path(), &RunArgs::default(), None).unwrap();
 	assert_eq!(env.get("GLOBAL_KEY").unwrap(), "global_value");
 }
 
@@ -2932,7 +3112,7 @@ fn build_env_target_env_files_override_global_env_files() {
 	let mut spec = CommandSpec::new(vec!["echo".into()]);
 	spec.env_files = Some(vec![".env".into(), ".env.target".into()]);
 
-	let env = build_env(&spec, dir.path(), &RunArgs::default(), None).unwrap();
+	let env = build_env(&spec, dir.path(), dir.path(), &RunArgs::default(), None).unwrap();
 	assert_eq!(env.get("KEY").unwrap(), "target");
 }
 
@@ -5498,6 +5678,7 @@ fn parallel_target_calls_receive_per_leaf_output_prefix() {
 		&shell,
 		&args,
 		dir.path(),
+		dir.path(),
 		None,
 		false,
 		&counter,
@@ -5570,6 +5751,7 @@ fn inherited_output_prefix_overrides_per_leaf_in_nested_parallel() {
 		&shell,
 		&args,
 		dir.path(),
+		dir.path(),
 		None,
 		false,
 		&counter,
@@ -5618,6 +5800,7 @@ fn sequential_target_call_forwards_output_prefix() {
 		&shell,
 		&args,
 		dir.path(),
+		dir.path(),
 		None,
 		false,
 		&counter,
@@ -5659,6 +5842,7 @@ fn top_level_no_prefix_means_no_propagation_through_sequential() {
 		&spec,
 		&shell,
 		&args,
+		dir.path(),
 		dir.path(),
 		None,
 		false,

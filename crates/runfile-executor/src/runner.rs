@@ -359,6 +359,7 @@ fn run_target_inner_body(
 		let env = crate::env::build_env_with_base(
 			spec,
 			&effective_working_dir,
+			target_runfile_dir,
 			target_args,
 			root.available_private_keys,
 			parent_env,
@@ -419,6 +420,7 @@ fn run_target_inner_body(
 			shell,
 			target_args,
 			&effective_working_dir,
+			target_runfile_dir,
 			root.available_private_keys,
 			root.timings,
 			&root.step_counter,
@@ -433,6 +435,7 @@ fn run_target_inner_body(
 			shell,
 			target_args,
 			&effective_working_dir,
+			target_runfile_dir,
 			root.available_private_keys,
 			root.timings,
 			&root.step_counter,

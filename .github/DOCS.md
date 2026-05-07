@@ -286,7 +286,7 @@ Each target is an object under `targets`:
 | `description`       | `string`                  | No       | Shown in `run :list` output.                                                                                                                                |
 | `envFiles`          | `string[]`                | No       | File paths to load environment variables from. Supports `{{ ARGS }}` and `{{ ENV }}` substitution. Loaded before `env`.                                           |
 | `env`               | `object`                  | No       | Environment variables for this target. Values can be strings, numbers, or booleans.                                                                         |
-| `addToPath`         | `string[]`                | No       | Directories to prepend to `PATH`. Relative paths resolve from the Runfile.json location.                                                                    |
+| `addToPath`         | `string[]`                | No       | Directories to prepend to `PATH`. Relative paths always resolve from the source `Runfile.json` directory (`{{ RUN.parent }}`), regardless of `workingDirectory`. Use `{{ RUN.cwd }}/bin` if you want CWD-relative behaviour. |
 | `forceShell`        | `string`                  | No       | Force a specific shell for this target.                                                                                                                     |
 | `logging`           | `boolean`                 | No       | Print each command before running it.                                                                                                                       |
 | `ignoreErrors`      | `boolean`                 | No       | Continue running commands even if one fails, and exit with code 0.                                                                                          |
@@ -1128,8 +1128,10 @@ export KEY=value      # export prefix is accepted
 
 **Behavior:**
 
-- File paths are relative to the working directory (Runfile.json location by default, or whatever
-  `workingDirectory` resolves to — e.g. `{{ RUN.cwd }}` for the caller's CWD).
+- **File paths are relative to the source Runfile's directory** (`{{ RUN.parent }}`), regardless of the target's
+  `workingDirectory`. Env files are configuration co-located with the Runfile, so changing `workingDirectory` to
+  a subdir does NOT change where `envFiles` are looked up. Use absolute paths (or `{{ RUN.cwd }}/.env`) if you
+  want different behaviour.
 - **Missing files are silently ignored.** This allows patterns like `.env.local` that only exist on some machines.
 - **Unparseable files produce an error.**
 - `envFiles` are loaded **before** the inline `env` object, so `env` values override file values.
@@ -1367,7 +1369,9 @@ Add directories to `PATH` so your commands can find project-local binaries:
 }
 ```
 
-- Relative paths are resolved from the directory containing `Runfile.json`.
+- Relative paths are always resolved from the source `Runfile.json` directory (`{{ RUN.parent }}`), regardless of
+  the target's `workingDirectory`. To anchor against the caller's CWD instead, write
+  `{{ RUN.cwd }}/bin`.
 - Global `addToPath` entries come first, then target-level entries, then the existing system `PATH`. The final `PATH`
   looks like `<global-entries>:<target-entries>:<system-PATH>`.
 - Because `PATH` lookups are left-to-right, this means a global entry shadows a target entry that resolves to the same

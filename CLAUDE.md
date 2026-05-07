@@ -64,7 +64,12 @@ crates/
   has no globals. Merge semantics: `envFiles`/`addToPath` are prepended, `env` is deep-merged (target overrides same
   keys), scalar fields (forceShell, logging, ignoreErrors, etc.) use target-if-set-else-global. After merging,
   `runfile.globals` is set to `None` — downstream code never sees globals. `merge_runfiles()` handles multi-file
-  includes with target conflict resolution.
+  includes with target conflict resolution. As part of the same pass, target-level relative `addToPath` entries are
+  baked to absolute paths against `source_dir` (the source Runfile's parent dir). This gives `addToPath` the same
+  "anchor to runfile parent" semantics as `envFiles`, decoupled from the runtime `workingDirectory`. Globals'
+  `addToPath` was already baked the same way; the target-side baking just extends the rule. `envFiles` are NOT
+  baked (they're substitution templates) — they're resolved at runtime via `EnvBuildParams::env_files_base_dir`,
+  which the runner / extract pipeline always sets to the target's source dir.
 - `merge.rs` (cont.): include entries (`IncludeEntry`) are either a plain path string or
   `{ path, namespace? }`. When a namespace is set, `apply_namespace_to_state()` rewrites every target name and alias
   in that include's sub-state, plus every `@target` reference inside its command tree (`rewrite_target_calls_in_steps`
@@ -183,7 +188,9 @@ crates/
   single/double/unquoted values, multiline quoted values, escape sequences in double quotes, `export` prefix, inline
   comments.
 - `load_env_files()`: loads multiple env files with substitution in file paths (via a caller-provided closure), relative
-  path resolution, and silent skipping of missing files.
+  path resolution, and silent skipping of missing files. The base directory for resolving relative paths is the
+  caller's `env_files_base_dir` (passed via `EnvBuildParams`) — always the source Runfile's parent dir, never the
+  resolved `workingDirectory`.
 - `build_env()`: main orchestration via `EnvBuildParams` struct. Merge order (low → high):
   (1) `base_env` (system env for top-level, parent's resolved env for `@dep`) → (2) `envFiles` (substitution sees the
   env_map built so far; later files win per key) → (3) `env` (substituted; wins over envFiles within the Runfile
@@ -194,7 +201,10 @@ crates/
   (6) decrypt encrypted values (if a key is available). Accepts a substitution closure so it stays independent of arg
   parsing. `EnvBuildParams` has data fields: `env_files`, `env`, `add_to_path`, plus `parent_add_to_path_chain` for
   threading ancestor `addToPath` layers through `@dep` invocations (no global/command distinction — globals are baked
-  into each target by the parser).
+  into each target by the parser). Two distinct path inputs: `working_dir` (the resolved `workingDirectory`, used as
+  the spawn dir and as the base for relative `addToPath` entries) and `env_files_base_dir` (the source Runfile's
+  parent dir, used as the base for relative `envFiles`). Decoupling these means a target with
+  `workingDirectory: "subdir"` still loads `envFiles: [".env"]` from the Runfile dir, not from `subdir/`.
 - `apply_add_to_path_chain` is a no-op when both the parent chain (or its layers) and this target's `add_to_path`
   contribute zero entries — so single-target runs and unused chains never touch the `PATH` value or perturb its case.
 - Substitution semantics intentionally stay "lexical": within a target's `env` block, a value can reference a key set

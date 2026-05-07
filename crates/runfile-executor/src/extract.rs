@@ -227,6 +227,7 @@ fn extract_recursive_inner(
 	let env = build_env_with_base(
 		spec,
 		effective_working_dir,
+		target_runfile_dir,
 		args,
 		ctx.available_private_keys,
 		parent_env,
