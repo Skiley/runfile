@@ -195,13 +195,21 @@ crates/
   resolved `workingDirectory`.
 - `build_env()`: main orchestration via `EnvBuildParams` struct. Merge order (low → high):
   (1) `base_env` (system env for top-level, parent's resolved env for `@dep`) → (2) `envFiles` (substitution sees the
-  env_map built so far; later files win per key) → (3) `env` (substituted; wins over envFiles within the Runfile
-  layer) → (4) **`overlay_shell_env`** re-applies `std::env::vars()` so the inherited shell env ALWAYS wins over
-  Runfile-defined keys (PATH is case-aware on Windows so we don't end up with both `Path` and `PATH`) →
-  (5) `apply_add_to_path_chain` prepends `[this target's add_to_path…, parent's add_to_path…, grandparent's…, current
-  PATH]` so the innermost `addToPath` ends up at the very front and the chain re-prepends after step 4 wiped PATH →
-  (6) decrypt encrypted values (if a key is available). Accepts a substitution closure so it stays independent of arg
-  parsing. `EnvBuildParams` has data fields: `env_files`, `env`, `add_to_path`, plus `parent_add_to_path_chain` for
+  env_map built so far; later files win per key) → (3) **decrypt encrypted file values** (so the env block sees
+  plaintext — see below) → (4) `env` (substituted; wins over envFiles within the Runfile layer) → (5)
+  **`overlay_shell_env`** re-applies `std::env::vars()` so the inherited shell env ALWAYS wins over Runfile-defined
+  keys (PATH is case-aware on Windows so we don't end up with both `Path` and `PATH`) → (6) `apply_add_to_path_chain`
+  prepends `[this target's add_to_path…, parent's add_to_path…, grandparent's…, current PATH]` so the innermost
+  `addToPath` ends up at the very front and the chain re-prepends after step 5 wiped PATH → (7) **final decrypt
+  pass** as a defensive backstop in case a later step (env block, shell overlay) introduced an `encrypted:...`
+  value. Accepts a substitution closure so it stays independent of arg parsing.
+
+  The decrypt-before-env-block ordering matters: it makes `"env": { "X": "{{ base64_decode(ENV.SECRET_BASE64) }}" }`
+  work when `SECRET_BASE64` is encrypted in `.env.production` — the env block sees the decrypted base64 string
+  (not the literal `encrypted:abc...` form), so `base64_decode` operates on real input. Without this, the env
+  block would see the encrypted form and any post-processing (`base64_decode`, `==` comparisons, function calls)
+  would error. The system env (`base_env`) supplies `RUNFILE_ENCRYPTION_PUBLIC_KEY` if it's not in the file, so
+  shell-set keys still work for the early decryption pass. `EnvBuildParams` has data fields: `env_files`, `env`, `add_to_path`, plus `parent_add_to_path_chain` for
   threading ancestor `addToPath` layers through `@dep` invocations (no global/command distinction — globals are baked
   into each target by the parser). Two distinct path inputs: `working_dir` (the resolved `workingDirectory`, used as
   the spawn dir and as the base for relative `addToPath` entries) and `env_files_base_dir` (the source Runfile's

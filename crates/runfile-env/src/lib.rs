@@ -172,9 +172,28 @@ pub fn build_env(
 		env_map.extend(file_vars);
 	}
 
+	// Decrypt encrypted file-loaded values BEFORE the env block runs so that
+	// `{{ ENV.SECRET }}` references inside an `env` block see the decrypted
+	// plaintext (e.g. so `base64_decode(ENV.X)` works on a value that's both
+	// Runfile-encrypted in the file AND base64-encoded). Without this, the
+	// env block would see the literal `encrypted:abc...` form and any
+	// post-processing would error.
+	//
+	// `RUNFILE_ENCRYPTION_PUBLIC_KEY` is read from `env_map`, which already
+	// contains the system env (base_env), so a key set in the shell env
+	// works the same as one set in the env file. Any decrypted value can
+	// still be overwritten by `overlay_shell_env` below — the shell wins
+	// for keys it defines.
+	if runfile_crypto::has_encrypted_values(&env_map) {
+		let key_hex = resolve_decryption_key(&env_map, params.available_private_keys)?;
+		runfile_crypto::decrypt_env_values(&mut env_map, &key_hex).map_err(|e| EnvError::Encryption(e.to_string()))?;
+	}
+
 	// Layer env vars (substitution sees the env_map built so far; same-key
 	// values override the file layer at this stage — though shell will win in
-	// the next step).
+	// the next step). At this point any encrypted file values have been
+	// decrypted, so substitutions like `{{ base64_decode(ENV.X) }}` work
+	// without the user having to think about decryption ordering.
 	if let Some(env_vars) = params.env {
 		for (key, raw) in env_vars {
 			let resolved = substitute(raw, &env_map).map_err(EnvError::Substitution)?;
@@ -198,7 +217,9 @@ pub fn build_env(
 		params.working_dir,
 	);
 
-	// Decrypt any encrypted env values if present.
+	// Final decrypt pass: if the env block (or shell overlay) somehow
+	// introduced an `encrypted:...` value — uncommon but possible — make
+	// sure it doesn't leak through to the child process.
 	if runfile_crypto::has_encrypted_values(&env_map) {
 		let key_hex = resolve_decryption_key(&env_map, params.available_private_keys)?;
 		runfile_crypto::decrypt_env_values(&mut env_map, &key_hex).map_err(|e| EnvError::Encryption(e.to_string()))?;
