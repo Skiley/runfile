@@ -489,17 +489,18 @@ crates/
   expand twice (matching runtime no-dedup semantics). Optional calls (`@?target`) silently skip when the target
   is missing. `extract_target_with_cwd` auto-syncs `args.run_context.namespaces` from the merged Runfile (matches
   the runner's `ensure_run_context`) so `for in: "namespaces"` resolves identically in dry-run.
-- Global flags: `-f`/`--file` (custom Runfile path), `--shell` (override shell by name or path), `--timings`
-  (print execution times), `-y`/`--yes` (skip confirms). For inline debug branching, declare `{{ FLAGS.debug }}`
-  in your target — passing `--debug` (or any other flag) to a target works through the standard FLAGS
-  substitution.
+- Global flags: `-f`/`--file` (custom Runfile path), `--timings` (print execution times), `-y`/`--yes` (skip
+  confirms), `--stdin-args` (prompt for missing `ARGS.*`/`ENV.*`/`FLAGS.*` instead of erroring),
+  `--dry-run` (print resolved leaf shell commands without executing). For inline debug branching, declare
+  `{{ FLAGS.debug }}` in your target — passing `--debug` (or any other flag) to a target works through the
+  standard FLAGS substitution.
 - `RUNFILE_TARGET` env var: when `-f`/`--file` is not passed, this env var is used as the default Runfile path before
   falling back to auto-discovery. Defined in `runfile_helpers.rs` (`RUNFILE_TARGET_ENV_VAR`, `runfile_target_env()`,
   private `effective_file()`) and applied by `resolve_runfile_path`, `resolve_and_merge`, `cmd_list_targets` (in
   `completions.rs`), and `cmd_mcp_server`. Empty string is treated as unset. When set, the path is required to exist
   (or be a registered path alias) — no fallback to discovery — so misconfigured CI fails fast. `-f` always wins.
-- Shell resolution priority: `--shell` flag > target `forceShell` (which may come from globals merge) > auto-detect
-- `--shell` accepts both shell names ("bash") and direct paths ("C:\...\bash.exe")
+- Shell resolution priority: target `forceShell` (which may come from globals merge) > auto-detect. There is no
+  CLI-level shell override — pin a shell per target via `forceShell` if needed.
 - When no subcommand and no args: prints help. When args given: first arg is target name, rest are passed through.
 - Target names starting with `:` are reserved for built-in commands. Names like `ci:build` (colon not at start) are
   allowed.

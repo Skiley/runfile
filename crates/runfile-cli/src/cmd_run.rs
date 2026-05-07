@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use crate::agent_detect;
 use crate::runfile_helpers::{local_dir_from_merge, local_file_from_merge, resolve_and_merge};
-use crate::shell::{resolve_cli_shell_override, resolve_shell_for_runfile};
+use crate::shell::resolve_shell_for_runfile;
 
 /// Common resolved state shared across cmd_run, cmd_dry_run, cmd_watch.
 struct ResolvedTarget {
@@ -34,7 +34,6 @@ fn resolve_target_setup(
 	target_name: &str,
 	extra_args: &[String],
 	file: Option<&std::path::Path>,
-	cli_shell: Option<&str>,
 	stdin_args: bool,
 ) -> ResolvedTarget {
 	let merge_result = resolve_and_merge(file);
@@ -65,11 +64,7 @@ fn resolve_target_setup(
 	let settings = Settings::load().unwrap_or_default();
 
 	let spec = &runfile.targets[&resolved_name];
-	let shell = if let Some(shell_override) = cli_shell {
-		resolve_cli_shell_override(shell_override, &settings)
-	} else {
-		resolve_shell_for_runfile(spec.force_shell.as_deref(), &settings)
-	};
+	let shell = resolve_shell_for_runfile(spec.force_shell.as_deref(), &settings);
 
 	let prompter: Option<Arc<dyn StdinPrompter>> = if stdin_args {
 		Some(Arc::new(InteractiveStdinPrompter::new()))
@@ -249,17 +244,16 @@ pub fn cmd_run(
 	target_name: &str,
 	extra_args: &[String],
 	file: Option<&std::path::Path>,
-	cli_shell: Option<&str>,
 	timings: bool,
 	yes: bool,
 	stdin_args: bool,
 ) {
-	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell, stdin_args);
+	let rt = resolve_target_setup(target_name, extra_args, file, stdin_args);
 
 	// If the target defines watch patterns, automatically enter watch mode
 	let spec = &rt.runfile.targets[&rt.resolved_name];
 	if spec.watch.as_ref().is_some_and(|p| !p.is_empty()) {
-		return cmd_watch(target_name, extra_args, file, cli_shell, timings, yes, stdin_args);
+		return cmd_watch(target_name, extra_args, file, timings, yes, stdin_args);
 	}
 
 	let private_keys = rt.settings.resolve_private_keys();
@@ -310,16 +304,10 @@ pub fn cmd_run(
 	}
 }
 
-pub fn cmd_dry_run(
-	target_name: &str,
-	extra_args: &[String],
-	file: Option<&std::path::Path>,
-	cli_shell: Option<&str>,
-	stdin_args: bool,
-) {
+pub fn cmd_dry_run(target_name: &str, extra_args: &[String], file: Option<&std::path::Path>, stdin_args: bool) {
 	agent_detect::refuse_if_agent("dry-run a target");
 
-	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell, stdin_args);
+	let rt = resolve_target_setup(target_name, extra_args, file, stdin_args);
 
 	let private_keys = rt.settings.resolve_private_keys();
 	let pk_slice: Option<&[String]> = if private_keys.is_empty() {
@@ -356,7 +344,6 @@ pub fn cmd_watch(
 	target_name: &str,
 	extra_args: &[String],
 	file: Option<&std::path::Path>,
-	cli_shell: Option<&str>,
 	timings: bool,
 	yes: bool,
 	stdin_args: bool,
@@ -371,7 +358,7 @@ pub fn cmd_watch(
 	const CYAN: &str = "\x1b[36m";
 	const DIM: &str = "\x1b[2m";
 
-	let rt = resolve_target_setup(target_name, extra_args, file, cli_shell, stdin_args);
+	let rt = resolve_target_setup(target_name, extra_args, file, stdin_args);
 
 	let spec = &rt.runfile.targets[&rt.resolved_name];
 	let watch_patterns = match &spec.watch {

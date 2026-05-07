@@ -347,7 +347,7 @@ _run_completions() {
     local subcmd2=""
     for ((i=1; i < cword; i++)); do
         case "${words[i]}" in
-            -f|--file|--shell) ((i++)); continue ;;
+            -f|--file) ((i++)); continue ;;
             -*) continue ;;
             :*) subcmd="${words[i]}"; break ;;
             *) break ;;  # first positional = target name, stop
@@ -366,9 +366,6 @@ _run_completions() {
 
     # Complete flag values
     case "$prev" in
-        --shell)
-            COMPREPLY=($(compgen -W "bash zsh sh fish powershell cmd" -- "$cur"))
-            return ;;
         -f|--file)
             if declare -F _filedir >/dev/null 2>&1; then
                 _filedir
@@ -380,7 +377,7 @@ _run_completions() {
 
     # Complete flags
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-f --file --shell -h --help --version" -- "$cur"))
+        COMPREPLY=($(compgen -W "-f --file -h --help --version" -- "$cur"))
         return
     fi
 
@@ -429,7 +426,6 @@ _run() {
     _arguments -C \
         '-f[Path to Runfile]:file:_files' \
         '--file=[Path to Runfile]:file:_files' \
-        '--shell=[Override shell]:shell:(bash zsh sh fish powershell cmd)' \
         '-h[Print help]' \
         '--help[Print help]' \
         '--version[Print version]' \
@@ -528,20 +524,11 @@ pub const POWERSHELL_COMPLETION: &str = r#"Register-ArgumentCompleter -CommandNa
     $subcmd = $null
     for ($i = 1; $i -lt $wordCount - 1; $i++) {
         switch ($words[$i]) {
-            { $_ -in '-f', '--file', '--shell' } { $i++; continue }
+            { $_ -in '-f', '--file' } { $i++; continue }
             { $_ -match '^-' } { continue }
             { $_ -match '^:' } { $subcmd = $words[$i]; break }
             default { break }
         }
-    }
-
-    # Previous word for flag value completion
-    $prev = if ($wordCount -ge 2) { $words[$wordCount - 2] } else { $null }
-    if ($prev -eq '--shell') {
-        'bash', 'zsh', 'sh', 'fish', 'powershell', 'cmd' |
-            Where-Object { $_ -like "$wordToComplete*" } |
-            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
-        return
     }
 
     # Find sub-subcommand

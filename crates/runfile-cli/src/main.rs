@@ -38,10 +38,6 @@ pub struct Cli {
 	#[arg(short = 'f', long = "file")]
 	file: Option<PathBuf>,
 
-	/// Override shell for execution (name like "bash" or full path like "/usr/bin/bash")
-	#[arg(long = "shell")]
-	shell: Option<String>,
-
 	/// Print execution time for each command and target
 	#[arg(long = "timings")]
 	timings: bool,
@@ -508,19 +504,12 @@ fn main() {
 				let target_name = &cli.args[0];
 				let extra_args: Vec<String> = cli.args[1..].to_vec();
 				if cli.dry_run {
-					cmd_run::cmd_dry_run(
-						target_name,
-						&extra_args,
-						cli.file.as_deref(),
-						cli.shell.as_deref(),
-						cli.stdin_args,
-					);
+					cmd_run::cmd_dry_run(target_name, &extra_args, cli.file.as_deref(), cli.stdin_args);
 				} else {
 					cmd_run::cmd_run(
 						target_name,
 						&extra_args,
 						cli.file.as_deref(),
-						cli.shell.as_deref(),
 						cli.timings,
 						cli.yes,
 						cli.stdin_args,
