@@ -15,12 +15,6 @@ inputs:
       Pass GitHub secrets directly here — keys are stored in the runner's OS credential
       store for the duration of the job. On Linux runners, a session keyring daemon is
       bootstrapped automatically.
-
-      Example:
-        with:
-          secret-keys: |
-            ${{ secrets.RUNFILE_KEY_PROD }}
-            ${{ secrets.RUNFILE_KEY_STAGING }}
     default: ''
   global-files:
     description: |
@@ -28,11 +22,6 @@ inputs:
       via `run :config global-files add`. Useful for layering CI-only targets on top of
       the project's main Runfile. Paths are resolved relative to the workflow's working
       directory (typically the checkout root).
-
-      Example:
-        with:
-          global-files: |
-            Runfile-ci.json
     default: ''
 
 runs:
