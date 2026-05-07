@@ -235,13 +235,27 @@ and work as full substitution bodies *or* as chain segments:
 
 ```jsonc
 "commands": [
-  // Built-ins: to_upper, to_lower, base64_encode, base64_decode, concat, join, replace_all, shell_quote, define
+  // Built-ins:
+  //   case      : to_upper, to_lower, capitalize
+  //   trim      : trim, trim_start, trim_end
+  //   inspect   : length, starts_with, ends_with, contains
+  //   transform : escape, repeat, replace_all, remove_all
+  //   regex     : regex_replace, regex_remove, regex_matches
+  //   build     : concat, join
+  //   encoding  : base64_encode, base64_decode
+  //   shell     : shell_quote
+  //   variables : define
   "echo deploying-{{ to_upper(ARGS.env) }}",
   "curl -H \"X-Auth: {{ base64_encode(ENV.TOKEN) }}\" ...",
   "echo {{ concat('hello-', ARGS.name, '-2026') }}",
   "echo {{ join(' AND ', flag-1, flag-2, ARGS.extra) }}",
   // Tokenise-and-rejoin-style transforms via replace_all:
   "go test {{ replace_all(ARGS.flags, ' ', ' -tag=') }}",
+  // Strip every match of a regex (here: collapse whitespace runs to a single space):
+  "echo {{ regex_replace(ARGS.text, '\\s+', ' ') }}",
+  // Boolean-returning helpers are valid DSL `Truthy` values — use them in `if`:
+  // "if": "{{ starts_with(ARGS.path, '/usr') }}"
+  // "if": "{{ regex_matches(ARGS.tag, '^v[0-9]+\\.[0-9]+$') }}"
 
   // Safely inline arbitrary content (newlines, quotes, JSON) as a CLI arg —
   // `shell_quote` picks the right quoting for the active shell:

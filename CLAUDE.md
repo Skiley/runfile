@@ -288,11 +288,26 @@ crates/
 - **Function calls** (`{{ <funcname>(arg1, arg2, ...) }}`): identifier matches `[a-z][a-z0-9_]*` so it can't collide
   with the uppercase source prefixes; `(` immediately follows the name; arguments are separated by `, ` (comma + one
   space — strict whitespace, mirroring the chain `?` and FLAGS `:` rules). Built-in registry (in
-  `evaluate_function`): `to_upper(s)`, `to_lower(s)`, `base64_encode(s)`,
-  `base64_decode(s)` (errors on `InvalidBase64` / `NonUtf8Decoded`), `concat(s1, s2, ...)` (variadic, 1+ args),
-  `join(sep, s1, s2, ...)` (variadic, 1+ args; `join(sep)` with no items returns `""`),
+  `evaluate_function`): `to_upper(s)`, `to_lower(s)`, `capitalize(s)` (uppercase the first char of every
+  whitespace-separated word; via `capitalize_words`, leaves internal capitals alone),
+  `trim(s)` / `trim_start(s)` / `trim_end(s)` (strip whitespace per Rust's `str::trim*`,
+  i.e. all `char::is_whitespace`), `length(s)` (Unicode scalar count via `chars().count()`, NOT byte count),
+  `starts_with(haystack, needle)` / `ends_with(haystack, needle)` /
+  `contains(haystack, needle)` (return literal `"true"`/`"false"` so they double as `Truthy` DSL values),
+  `escape(s)` (backslash-escape control chars + `"`; via `escape_string`, NOT a full JSON escape — single
+  quotes pass through unchanged; non-printable bytes < 0x20 emit `\xNN`),
+  `repeat(s, n)` (n must parse as `usize`; surfaces as [`SubstitutionError::InvalidNumber`] otherwise),
   `replace_all(haystack, needle, replacement)` (defers to Rust's `str::replace`; an empty `needle` produces
   the replacement between every char, matching stdlib semantics),
+  `remove_all(haystack, needle)` (sugar for `replace_all(s, n, '')`),
+  `regex_replace(haystack, pattern, replacement)` /
+  `regex_remove(haystack, pattern)` (sugar for `regex_replace(s, p, '')`) /
+  `regex_matches(haystack, pattern)` (compile via `compile_regex`; pattern errors surface as
+  [`SubstitutionError::InvalidRegex`]; replacement strings honour the `regex` crate's
+  `$1`/`${name}` backreferences; `regex_matches` is unanchored, use `^...$` for full-string),
+  `base64_encode(s)`,
+  `base64_decode(s)` (errors on `InvalidBase64` / `NonUtf8Decoded`), `concat(s1, s2, ...)` (variadic, 1+ args),
+  `join(sep, s1, s2, ...)` (variadic, 1+ args; `join(sep)` with no items returns `""`),
   `shell_quote(s)` (per-shell single-arg quoting via [`quote_for_shell`] dispatching on `RUN.shell` —
   POSIX/fish use `'...'` with `'\''` escape, PowerShell uses `'...'` with `''` escape, cmd uses `"..."` with
   `""` escape; lets users inline arbitrary bytes — newlines, `$`, `"`, `'`, JSON, etc. — into shell commands
@@ -303,6 +318,7 @@ crates/
   (`to_upper(to_lower(x))`) and chained args (`to_upper(ARGS.x ? 'default')`) work naturally. The chain splitter
   (`split_chain_segments`) is paren / quote aware so ` ? ` inside `(...)` or `'...'`/`"..."` doesn't split.
   Errors: `UnknownFunction`, `FunctionArity { name, expected, got }`, `InvalidBase64`, `NonUtf8Decoded`,
+  `InvalidRegex { name, message }`, `InvalidNumber { name, message }`,
   `UnbalancedParens`, `BarewordLiteralNotAllowed`, plus `MalformedSubstitution` for arg-list whitespace violations.
 - **DSL inside substitutions**: a substitution body containing the boolean operators `==`, `!=`, `&&`, `||`, or
   unary `!` at top level (paren / quote / nested-substitution aware — see `looks_like_dsl`) is parsed as a DSL

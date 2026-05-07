@@ -6568,6 +6568,341 @@ mod functions {
 		assert_eq!(result, "A | B | C");
 	}
 
+	// ── remove_all ──
+
+	#[test]
+	fn remove_all_strips_every_occurrence() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ remove_all('foo-bar-baz', '-') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "foobarbaz");
+	}
+
+	#[test]
+	fn remove_all_no_match_returns_input() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ remove_all('hello', 'x') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "hello");
+	}
+
+	#[test]
+	fn remove_all_wrong_arity_errors() {
+		let args = RunArgs::parse(&[]);
+		let err = args.substitute("{{ remove_all('a') }}", &HashMap::new()).unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::FunctionArity { ref name, got: 1, .. } if name == "remove_all"
+		));
+	}
+
+	// ── starts_with / ends_with / contains ──
+
+	#[test]
+	fn starts_with_true_and_false() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ starts_with('hello world', 'hello') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ starts_with('hello world', 'world') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn ends_with_true_and_false() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ ends_with('hello world', 'world') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ ends_with('hello world', 'hello') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn contains_true_and_false() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ contains('hello world', 'lo wo') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ contains('hello world', 'xyz') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn boolean_function_works_as_dsl_truthy() {
+		// starts_with returns "true"/"false" so it's a valid DSL Truthy value.
+		let args = RunArgs::parse(&["--path=/usr/local/bin".into()]);
+		let result = args
+			.substitute(
+				"{{ starts_with(ARGS.path, '/usr') && ends_with(ARGS.path, 'bin') }}",
+				&HashMap::new(),
+			)
+			.unwrap();
+		assert_eq!(result, "true");
+	}
+
+	#[test]
+	fn contains_wrong_arity_errors() {
+		let args = RunArgs::parse(&[]);
+		let err = args.substitute("{{ contains('a') }}", &HashMap::new()).unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::FunctionArity { ref name, got: 1, .. } if name == "contains"
+		));
+	}
+
+	// ── capitalize ──
+
+	#[test]
+	fn capitalize_uppercases_first_letter_of_each_word() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ capitalize('hello world') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "Hello World");
+	}
+
+	#[test]
+	fn capitalize_preserves_internal_capitals() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ capitalize('mcDonald hAs lUnch') }}", &HashMap::new())
+			.unwrap();
+		// First char of each word uppercased, rest passes through.
+		assert_eq!(result, "McDonald HAs LUnch");
+	}
+
+	#[test]
+	fn capitalize_handles_tabs_and_multiple_spaces() {
+		let mut env = HashMap::new();
+		env.insert("V".into(), "foo  bar\tbaz".into());
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ capitalize(ENV.V) }}", &env).unwrap();
+		assert_eq!(result, "Foo  Bar\tBaz");
+	}
+
+	#[test]
+	fn capitalize_empty_string() {
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ capitalize('') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "");
+	}
+
+	// ── trim / trim_start / trim_end ──
+
+	#[test]
+	fn trim_strips_all_whitespace_both_sides() {
+		let mut env = HashMap::new();
+		env.insert("V".into(), "  \t hello \n ".into());
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ trim(ENV.V) }}", &env).unwrap();
+		assert_eq!(result, "hello");
+	}
+
+	#[test]
+	fn trim_start_only_left() {
+		let mut env = HashMap::new();
+		env.insert("V".into(), "  hello  ".into());
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ trim_start(ENV.V) }}", &env).unwrap();
+		assert_eq!(result, "hello  ");
+	}
+
+	#[test]
+	fn trim_end_only_right() {
+		let mut env = HashMap::new();
+		env.insert("V".into(), "  hello  ".into());
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ trim_end(ENV.V) }}", &env).unwrap();
+		assert_eq!(result, "  hello");
+	}
+
+	// ── length ──
+
+	#[test]
+	fn length_counts_unicode_scalars_not_bytes() {
+		// "héllo" is 6 bytes (é is 2 bytes in UTF-8) but 5 chars.
+		let mut env = HashMap::new();
+		env.insert("V".into(), "héllo".into());
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ length(ENV.V) }}", &env).unwrap();
+		assert_eq!(result, "5");
+	}
+
+	#[test]
+	fn length_empty_string() {
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ length('') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "0");
+	}
+
+	// ── escape ──
+
+	#[test]
+	fn escape_backslashes_control_chars_and_double_quotes() {
+		// Build the raw value via base64_decode so the source string can carry
+		// real control bytes.
+		let args = RunArgs::parse(&[]);
+		// "a\nb\tc\\d\"e" base64-encodes to: "YQpiCWNcZCJl"
+		let result = args
+			.substitute("{{ escape(base64_decode('YQpiCWNcZCJl')) }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "a\\nb\\tc\\\\d\\\"e");
+	}
+
+	#[test]
+	fn escape_passes_single_quotes_through() {
+		let mut env = HashMap::new();
+		env.insert("V".into(), "it's".into());
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ escape(ENV.V) }}", &env).unwrap();
+		// `'` is NOT escaped — Runfile uses `'...'` heavily, so leaving the
+		// quote alone is the less surprising default.
+		assert_eq!(result, "it's");
+	}
+
+	#[test]
+	fn escape_emits_hex_for_other_control_bytes() {
+		// Bell = 0x07. base64("\x07") = "Bw==".
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ escape(base64_decode('Bw==')) }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "\\x07");
+	}
+
+	// ── repeat ──
+
+	#[test]
+	fn repeat_basic() {
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ repeat('ab', '3') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "ababab");
+	}
+
+	#[test]
+	fn repeat_zero_returns_empty() {
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ repeat('hello', '0') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "");
+	}
+
+	#[test]
+	fn repeat_count_can_come_from_args() {
+		// Counts naturally come from runtime sources (ARGS / ENV / VARS) — the
+		// quoted-literal form is just for static numbers in the Runfile.
+		let args = RunArgs::parse(&["--n=4".into()]);
+		let result = args
+			.substitute("{{ repeat('ab', ARGS.n) }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "abababab");
+	}
+
+	#[test]
+	fn repeat_invalid_count_errors() {
+		let args = RunArgs::parse(&[]);
+		let err = args
+			.substitute("{{ repeat('hi', 'oops') }}", &HashMap::new())
+			.unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::InvalidNumber { ref name, .. } if name == "repeat"
+		));
+	}
+
+	// ── regex_replace / regex_remove / regex_matches ──
+
+	#[test]
+	fn regex_replace_collapses_whitespace_runs() {
+		let mut env = HashMap::new();
+		env.insert("V".into(), "hello   world\tagain".into());
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ regex_replace(ENV.V, '\\s+', ' ') }}", &env)
+			.unwrap();
+		assert_eq!(result, "hello world again");
+	}
+
+	#[test]
+	fn regex_replace_supports_backreferences() {
+		// `(\w+)=(\w+)` → `$2:$1` swaps key=value to value:key.
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute(
+				"{{ regex_replace('foo=bar', '(\\w+)=(\\w+)', '$2:$1') }}",
+				&HashMap::new(),
+			)
+			.unwrap();
+		assert_eq!(result, "bar:foo");
+	}
+
+	#[test]
+	fn regex_remove_strips_pattern() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ regex_remove('keep-DEL-this-DEL-text', 'DEL-?') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "keep-this-text");
+	}
+
+	#[test]
+	fn regex_matches_unanchored() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute(
+				"{{ regex_matches('v1.2.3', '^v\\d+\\.\\d+\\.\\d+$') }}",
+				&HashMap::new()
+			)
+			.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ regex_matches('v1.2', '^v\\d+\\.\\d+\\.\\d+$') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn regex_invalid_pattern_errors() {
+		let args = RunArgs::parse(&[]);
+		// Unclosed `(` is a regex compile error.
+		let err = args
+			.substitute("{{ regex_matches('hello', '(unclosed') }}", &HashMap::new())
+			.unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::InvalidRegex { ref name, .. } if name == "regex_matches"
+		));
+	}
+
+	#[test]
+	fn regex_matches_works_as_dsl_truthy() {
+		// regex_matches returns "true"/"false" → valid DSL Truthy.
+		let args = RunArgs::parse(&["--tag=v1.0".into()]);
+		let result = args
+			.substitute("{{ regex_matches(ARGS.tag, '^v[0-9]+\\.[0-9]+$') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "true");
+	}
+
 	// ── shell_quote ──
 
 	fn args_with_shell(shell: &str) -> RunArgs {
