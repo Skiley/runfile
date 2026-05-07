@@ -411,7 +411,10 @@ crates/
   walker and `@target` resolver are always engaged.
 - LLM-agent guard (`agent_detect.rs`): `refuse_if_agent(action_description)` aborts with an error if it detects an
   agent invocation. Detection signals (any one triggers): env vars `CLAUDECODE=1`, `LLM_INVOCATION=true`, or
-  `AGENT_MODE=1`, or stdin not being a terminal. Applied to commands that emit decrypted secrets or otherwise
+  `AGENT_MODE=1`, or stdin not being a terminal **unless** a CI environment is detected. CI detection looks for
+  any non-empty value in `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `BUILDKITE`, `JENKINS_URL`,
+  `TF_BUILD`, `TEAMCITY_VERSION`, or `BITBUCKET_BUILD_NUMBER` — CI suppresses **only** the stdin heuristic, so
+  explicit agent env vars still trigger regardless. Applied to commands that emit decrypted secrets or otherwise
   resolved env values: `:env get`, `:env decrypt`, `:env secret-keys list`, `:env secret-keys get-private`,
   and `--dry-run` (`format_extracted_commands` inlines resolved env vars — including decrypted secrets — into the
   printed shell-ready commands). When adding a new command that prints resolved env values, decrypted secrets,
