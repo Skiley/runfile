@@ -7,8 +7,8 @@ use crate::executor::{
 };
 use crate::logging::{log_command, log_target_timing, StepCounter};
 use runfile_parser::{
-	walk_spec_aux_templates, CommandStep, ForInValue, ForStep, IfStep, Runfile, WhenStep, WORKING_DIRECTORY_CWD,
-	WORKING_DIRECTORY_RUNFILE_PARENT,
+	walk_spec_aux_templates, CommandStep, ForInValue, ForStep, IfStep, MatchStep, Runfile, WhenStep,
+	WORKING_DIRECTORY_CWD, WORKING_DIRECTORY_RUNFILE_PARENT,
 };
 use runfile_shell::{resolve_shell, ResolvedShell};
 use std::collections::{HashMap, HashSet};
@@ -520,6 +520,16 @@ fn count_step_leaves_recursive(
 					None => body_count, // glob/shell — 1-iteration estimate
 				}
 			}
+			CommandStep::Match(MatchStep { cases, default, .. }) => {
+				let mut total = 0;
+				for branch in cases.values() {
+					total += count_step_leaves_recursive(branch, runfile, cache, in_progress)?;
+				}
+				if let Some(default_steps) = default {
+					total += count_step_leaves_recursive(default_steps, runfile, cache, in_progress)?;
+				}
+				total
+			}
 		};
 	}
 	Ok(total)
@@ -638,6 +648,23 @@ fn collect_step_commands(
 					commands.push(s.clone());
 				}
 				collect_step_commands(body, runfile, commands, completed, in_progress)?;
+			}
+			CommandStep::Match(MatchStep {
+				r#match,
+				cases,
+				default,
+				..
+			}) => {
+				// The `match` template participates in arg-usage scanning so
+				// `$(ARGS.x)` references inside it register. The case keys are
+				// literal strings (no substitution), so we don't push them.
+				commands.push(r#match.clone());
+				for branch in cases.values() {
+					collect_step_commands(branch, runfile, commands, completed, in_progress)?;
+				}
+				if let Some(default_steps) = default {
+					collect_step_commands(default_steps, runfile, commands, completed, in_progress)?;
+				}
 			}
 		}
 	}

@@ -5488,6 +5488,193 @@ fn parallel_propagates_prefix_through_real_dispatched_target() {
 	assert!(marker_b.exists(), "child-b should have been dispatched");
 }
 
+// ── match step tests ──────────────────────────────────────────────
+
+#[test]
+fn match_runs_matching_case() {
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.tier)","cases":{"1":"echo one","2":"echo two","3":"echo three"}}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::parse(&["--tier=2".into()]);
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert_eq!(result.commands_run, 1);
+	assert!(result.final_status.success());
+}
+
+#[test]
+fn match_no_case_no_default_errors_with_valid_cases_listed() {
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.tier)","cases":{"1":"echo one","2":"echo two"}}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::parse(&["--tier=99".into()]);
+	let err = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap_err();
+	let msg = err.to_string();
+	assert!(msg.contains("99"), "should mention the bad value, got: {msg}");
+	assert!(msg.contains("\"1\""), "should list valid case 1, got: {msg}");
+	assert!(msg.contains("\"2\""), "should list valid case 2, got: {msg}");
+}
+
+#[test]
+fn match_default_runs_when_no_case_matches() {
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.tier)","cases":{"1":"exit 1"},"default":"echo fallback"}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::parse(&["--tier=42".into()]);
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert_eq!(result.commands_run, 1);
+	assert!(result.final_status.success(), "default branch should run");
+}
+
+#[test]
+fn match_missing_arg_uses_default_when_set() {
+	// When the substitution itself fails (missing arg, no chain default),
+	// `default` runs as a fallback for the unresolvable value.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.tier)","cases":{"1":"exit 1"},"default":"echo defaulted"}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::default();
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert_eq!(result.commands_run, 1);
+	assert!(result.final_status.success());
+}
+
+#[test]
+fn match_missing_arg_no_default_errors_with_valid_cases() {
+	// Without a `default`, a substitution failure surfaces an error that
+	// includes the valid case list so users can fix the call.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.tier)","cases":{"1":"echo one","2":"echo two"}}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::default();
+	let err = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap_err();
+	let msg = err.to_string();
+	assert!(
+		msg.contains("Could not resolve") || msg.contains("Argument"),
+		"got: {msg}"
+	);
+	assert!(msg.contains("\"1\""), "should list case 1 in error, got: {msg}");
+	assert!(msg.contains("\"2\""), "should list case 2 in error, got: {msg}");
+}
+
+#[test]
+fn match_chained_substitution_resolves_to_default_value() {
+	// `$(ARGS.tier ? 1)` resolves to "1" when --tier missing → case "1" runs.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.tier ? 1)","cases":{"1":"echo one","2":"exit 1"}}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::default();
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert!(result.final_status.success());
+}
+
+#[test]
+fn match_target_call_dispatch() {
+	use crate::runner::run_target;
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"prod": { "commands": ["echo prod"] },
+			"dev": { "commands": ["echo dev"] },
+			"deploy": {
+				"commands": [
+					{ "match": "$(ARGS.env)", "cases": { "prod": "@prod", "dev": "@dev" } }
+				]
+			}
+		}
+	}"#;
+	let runfile = runfile_parser::parse_runfile(json).unwrap();
+	let args = RunArgs::parse(&["--env=prod".into()]);
+	let result = run_target("deploy", &runfile, &shell, &args, dir.path()).unwrap();
+	assert!(result.final_status.success());
+	// The dep ran one shell.
+	assert!(result.commands_run >= 1);
+}
+
+#[test]
+fn match_ignore_errors_isolates_failure() {
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.x)","cases":{"a":"exit 1"},"ignoreErrors":true},
+			"echo after"
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::parse(&["--x=a".into()]);
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	// "echo after" must still run because the match block swallows its failure.
+	assert_eq!(result.commands_run, 2);
+	assert!(
+		result.final_status.success(),
+		"ignoreErrors should mask the inner failure"
+	);
+}
+
+#[test]
+fn match_used_with_for_loop() {
+	// Combine match with `for` to dispatch based on a loop variable.
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"for":"x","in":["a","b"],"do":[
+				{"match":"$(LOOP.x)","cases":{"a":"echo got-a","b":"echo got-b"}}
+			]}
+		]}}}"#,
+		"t",
+	);
+	let args = RunArgs::default();
+	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
+	assert_eq!(result.commands_run, 2);
+}
+
+#[test]
+fn match_count_leaves_sums_all_branches() {
+	use crate::control_flow::count_leaves;
+	let spec = parse_target(
+		r#"{"$schema":"x","targets":{"t":{"commands":[
+			{"match":"$(ARGS.x)","cases":{"a":"echo 1","b":["echo 2","echo 3"]},"default":"echo 4"}
+		]}}}"#,
+		"t",
+	);
+	// 1 + 2 + 1 = 4 worst-case leaves.
+	assert_eq!(count_leaves(&spec.commands), 4);
+}
+
 // ── --stdin-args prompter tests ────────────────────────────────────
 
 mod stdin_args {

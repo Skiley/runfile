@@ -61,7 +61,7 @@
 			]
 		},
 		"CommandStep": {
-			"description": "A step inside a `commands` array. Either a raw shell command string, a target invocation (`@target [args...]` — string starting with `@`, or `@?target [args...]` to silently skip when the target doesn't exist), a `when`-guarded block, or a control-flow block (`if` / `for` object).",
+			"description": "A step inside a `commands` array. Either a raw shell command string, a target invocation (`@target [args...]` — string starting with `@`, or `@?target [args...]` to silently skip when the target doesn't exist), a `when`-guarded block, or a control-flow block (`if` / `for` / `match` object).",
 			"oneOf": [
 				{
 					"type": "string"
@@ -74,6 +74,9 @@
 				},
 				{
 					"$ref": "#/$defs/ForStep"
+				},
+				{
+					"$ref": "#/$defs/MatchStep"
 				}
 			]
 		},
@@ -251,6 +254,60 @@
 					]
 				}
 			]
+		},
+		"MatchStep": {
+			"type": "object",
+			"description": "Multi-way dispatch on a substituted value. Resolves the `match` template through the normal substitution pipeline ($(ARGS.x), $(ENV.X), $(LOOP.x), $(RUN.*), chained fallbacks like $(ARGS.x ? ENV.X ? default), etc.), then runs the matching branch by string equality against the `cases` keys. When no case matches and no `default` is set, execution errors out and lists the valid cases.",
+			"required": [
+				"match",
+				"cases"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"match": {
+					"type": "string",
+					"description": "The substitution expression whose resolved value selects a case. Supports the full $(...) syntax including chained fallbacks."
+				},
+				"cases": {
+					"type": "object",
+					"description": "Map from case value (compared as a string against the resolved match value) to the steps to run. Each value is either a single shell-command string (sugar for a one-element array) or an array of command steps.",
+					"additionalProperties": {
+						"oneOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/CommandStep"
+								}
+							}
+						]
+					}
+				},
+				"default": {
+					"description": "Steps run when no case matches the resolved value. When omitted, an unmatched value is a hard error that lists the valid cases. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",
+					"oneOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/CommandStep"
+							}
+						}
+					]
+				},
+				"ignoreErrors": {
+					"type": "boolean",
+					"description": "When true, failures inside the chosen branch do not flip the run's success state."
+				},
+				"when": {
+					"$ref": "#/$defs/WhenCondition",
+					"description": "State guard for the entire `match` block. Default: `success`."
+				}
+			}
 		},
 		"CommandSpec": {
 			"type": "object",

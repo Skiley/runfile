@@ -1,6 +1,6 @@
 use crate::dsl::{parse_condition, DslParseError};
 use crate::schema::{
-	CommandStep, ForStep, IfStep, Runfile, TargetCallStep, WhenStep, WORKING_DIRECTORY_CWD,
+	CommandStep, ForStep, IfStep, MatchStep, Runfile, TargetCallStep, WhenStep, WORKING_DIRECTORY_CWD,
 	WORKING_DIRECTORY_RUNFILE_PARENT,
 };
 use std::path::Path;
@@ -76,6 +76,12 @@ pub enum ParseError {
 		"Invalid `workingDirectory` value \"{1}\" in {0} — must be \"runfileParent\" or \"cwd\" (or a `$(...)` substitution)."
 	)]
 	InvalidWorkingDirectoryLiteral(String, String),
+
+	#[error("`match` block in {0} has an empty match expression")]
+	EmptyMatchExpression(String),
+
+	#[error("`match` block in {0} has no cases and no default — at least one of `cases` (with at least one entry) or `default` is required")]
+	EmptyMatchCases(String),
 }
 
 /// Whether a string carries a `$(...)` substitution that defers its actual
@@ -218,6 +224,9 @@ pub(crate) fn validate_command_steps(steps: &mut [CommandStep], context: &str) -
 			CommandStep::For(for_step) => {
 				validate_for_step(for_step, context)?;
 			}
+			CommandStep::Match(match_step) => {
+				validate_match_step(match_step, context)?;
+			}
 		}
 	}
 	Ok(())
@@ -312,6 +321,25 @@ fn validate_for_step(step: &mut ForStep, context: &str) -> Result<(), ParseError
 
 	let body_ctx = format!("{context} > for/do");
 	validate_command_steps(&mut step.body, &body_ctx)?;
+	Ok(())
+}
+
+fn validate_match_step(step: &mut MatchStep, context: &str) -> Result<(), ParseError> {
+	if step.r#match.trim().is_empty() {
+		return Err(ParseError::EmptyMatchExpression(context.to_string()));
+	}
+	if step.cases.is_empty() && step.default.is_none() {
+		return Err(ParseError::EmptyMatchCases(context.to_string()));
+	}
+
+	for (case_value, case_steps) in step.cases.iter_mut() {
+		let case_ctx = format!("{context} > match/case \"{case_value}\"");
+		validate_command_steps(case_steps, &case_ctx)?;
+	}
+	if let Some(default_steps) = step.default.as_mut() {
+		let default_ctx = format!("{context} > match/default");
+		validate_command_steps(default_steps, &default_ctx)?;
+	}
 	Ok(())
 }
 

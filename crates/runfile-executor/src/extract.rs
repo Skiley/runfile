@@ -1,5 +1,5 @@
 use crate::args::{check_env_case_duplicates, validate_args, LoopScope, RunArgs, SubstitutionError};
-use crate::control_flow::{evaluate_if_condition, ControlFlowError};
+use crate::control_flow::{evaluate_if_condition, resolve_match_branch, ControlFlowError};
 use crate::env::{build_env_with_base, EnvFileError};
 use runfile_parser::{
 	walk_spec_aux_templates, walk_step_templates, CommandStep, ForStep, Runfile, WhenStep, WORKING_DIRECTORY_CWD,
@@ -298,6 +298,15 @@ fn walk_extract_steps(
 						r?;
 					}
 				}
+			}
+			CommandStep::Match(match_step) => {
+				// Same approach as `if`: dispatch using the same context the
+				// runner would see, then walk only the chosen branch. Surfaces
+				// `MatchValueUnresolved` / `MatchNoCase` errors at extract time
+				// so dry-run output matches the runtime contract — users see
+				// the same case-validation diagnostics in both modes.
+				let branch = resolve_match_branch(match_step, args, env, loop_scope)?;
+				walk_extract_steps(ctx, branch, args, env, extra_env, loop_scope, out)?;
 			}
 		}
 	}

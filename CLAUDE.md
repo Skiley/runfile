@@ -44,7 +44,7 @@ crates/
 **Files:** `schema.rs`, `discover.rs`, `parse.rs`, `merge.rs`, `dsl.rs`, `tests.rs`
 
 - Defines the Runfile schema as Rust types: `Runfile`, `CommandSpec`, `Globals`, `EnvValue`, `WhenStep`,
-  `WhenCondition`, `ExtendStdio`, `StdioStream`, `CommandStep`, `IfStep`, `ForStep`, `TargetCallStep`,
+  `WhenCondition`, `ExtendStdio`, `StdioStream`, `CommandStep`, `IfStep`, `ForStep`, `MatchStep`, `TargetCallStep`,
   `IncludeEntry`
 - Conditional configuration is expressed
   via `$(RUN.os)` / `$(RUN.shell)` substitution in scalar fields (env values, `forceShell`,
@@ -84,9 +84,10 @@ crates/
   result on `Runfile.namespaces` (a `#[serde(skip)]` field — never serialized; populated only by the merge
   step). The runner attaches this list to `RunArgs.run_context.namespaces` via `Arc<Vec<String>>` so
   `for "in": "namespaces"` resolves at execution time without threading another parameter through the executor.
-- Control-flow blocks (`if` / `for` / `when`) and target calls (`@target`): each entry of a `commands` array is a
-  [`CommandStep`] — either `Shell(String)` (raw command),
-  `TargetCall(TargetCallStep)` (a string starting with `@`), `When(WhenStep)`, `If(IfStep)`, or `For(ForStep)`.
+- Control-flow blocks (`if` / `for` / `match` / `when`) and target calls (`@target`): each entry of a `commands`
+  array is a [`CommandStep`] — either `Shell(String)` (raw command),
+  `TargetCall(TargetCallStep)` (a string starting with `@`), `When(WhenStep)`, `If(IfStep)`, `For(ForStep)`, or
+  `Match(MatchStep)`.
   Backwards-compatible: an existing string entry deserializes as `CommandStep::Shell` unless it starts with `@`.
   `IfStep` caches
   the parsed condition AST in a `condition_ast: Option<DslExpr>` field (filled in by `validate_runfile`, never
@@ -111,6 +112,22 @@ crates/
   substitution leaves (`$(ARGS.x)` / `$(ENV.X)` / `$(FLAGS.x)` / `$(LOOP.x)`), quoted strings, bare-words. Mixing
   `&&` and `||` in the same expression is a hard parse error — parens are required to disambiguate. Parsing happens
   eagerly during `validate_runfile`, so syntax errors surface at Runfile load time.
+- `MatchStep` (multi-way dispatch): `{ "match", "cases", "default"?, "ignoreErrors"?, "when"? }`. Stored on
+  `CommandStep::Match`. The `match` field is a substitution template — same pipeline as any other `$(...)`
+  reference, so chained fallbacks work (`$(ARGS.tier ? ENV.TIER ? 1)`). `cases` is a `BTreeMap<String,
+  Vec<CommandStep>>` (sorted; alphabetical iteration order in error messages); each case body accepts the usual
+  string-or-array sugar via the same `Value`-based deserializer pattern as `IfStep.then`. `default` is an
+  optional branch run when no case matches. Validation lives in `parse.rs::validate_match_step`: empty
+  match expression and empty cases-without-default are hard errors. Runtime semantics (in
+  `control_flow::resolve_match_branch`): substitute `match`; on substitution failure fall through to `default`
+  if set, else surface `ControlFlowError::MatchValueUnresolved` with valid cases listed; on substitution
+  success look up the value, run the case if found, else fall through to `default` or surface
+  `ControlFlowError::MatchNoCase`. Cases are looked up by exact string equality. `ignoreErrors`/`when` mirror
+  `IfStep`. `count_leaves` sums all cases + default (worst-case, like `if`'s both-branches counting).
+  `walk_step_templates` visits the `match` template and every leaf in cases + default for static analysis.
+  `collect_leaves_parallel_with_when`, `collect_detach_leaves_inner`, and `walk_extract_steps` all dispatch
+  via `resolve_match_branch` so only the chosen branch is collected — same approach as `if`. Namespace
+  rewriting (`rewrite_target_calls_in_steps`) recurses into every case body and the default branch.
 - Internal targets: `is_internal_target_name(name)` (free function in `schema.rs`) returns true when the **last**
   `:`-separated segment of a target's canonical name starts with `_`. The "last segment" rule is what makes namespaced
   internals (`api:_helper`) keep their internal status when an include applies a namespace.
@@ -412,9 +429,9 @@ Global properties: `addToPath`, `env`, `envFiles`, `forceShell`, `logging`, `ign
 `workingDirectory`, `onlyInDirectories`
 
 Each entry of a `commands` array is a [`CommandStep`]: a raw shell command string, a target invocation
-(`"@target [args...]"` string), a `WhenStep` (`{ when, commands, [ignoreErrors] }`), an `IfStep`, or a
-`ForStep`. `IfStep` and `ForStep` may carry a top-level `when` field too. See "Key Design Decisions" below for
-semantics.
+(`"@target [args...]"` string), a `WhenStep` (`{ when, commands, [ignoreErrors] }`), an `IfStep`, a
+`ForStep`, or a `MatchStep` (`{ match, cases, default?, ignoreErrors?, when? }`). `IfStep`, `ForStep`, and
+`MatchStep` may carry a top-level `when` field too. See "Key Design Decisions" below for semantics.
 
 Globals are merged into each target's `CommandSpec` at parse time (by `bake_globals_into_target()` in `merge.rs`).
 The in-memory `Runfile` has `globals: None` after parsing — all runtime code operates on self-contained targets.
@@ -452,8 +469,9 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   resolve to `"runfileParent"` or `"cwd"` (or be omitted), otherwise the runner errors with
   `RunError::InvalidWorkingDirectory`. Parse-time validation rejects literal non-canonical values; templates
   (containing `$(`) defer validation to runtime.
-- Control flow (`if` / `for` blocks) is evaluated by Runfile itself, not by the shell — same semantics on every
-  platform. Conditions use a tiny boolean DSL parsed at Runfile load time (errors fail fast). Truthiness rule: only
+- Control flow (`if` / `for` / `match` blocks) is evaluated by Runfile itself, not by the shell — same semantics
+  on every platform. Conditions use a tiny boolean DSL parsed at Runfile load time (errors fail fast). Truthiness
+  rule: only
   the empty string is falsy; every other string (including `"false"` and `"0"`) is truthy. This matches what raw
   shell commands see when they receive a `$(...)` substitution. Because `$(FLAGS.x)` resolves to `"true"` or
   `"false"` (both non-empty), flag presence checks must use explicit `== true` / `== false` comparisons. Mixing
@@ -503,6 +521,15 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
 - Parallel parents partition leaves by `when`: `when: success` leaves run as the parallel batch; if any failed,
   `when: failure` leaves run sequentially after; `when: always` leaves always run sequentially after.
   See `run_parallel_leaves` in `executor.rs`.
+- `match` blocks (`{ "match", "cases", "default"?, "ignoreErrors"?, "when"? }`) provide multi-way dispatch on a
+  substituted value with built-in case validation. The `match` template goes through the normal substitution
+  pipeline (chained fallbacks supported, e.g. `$(ARGS.tier ? ENV.TIER ? 1)`). `cases` keys are compared by exact
+  string equality against the resolved value. When no case matches, `default` runs if set; otherwise execution
+  errors out and the message lists every valid case so the user knows what values to pass. When the `match`
+  substitution itself fails (e.g. `$(ARGS.tier)` with no `--tier` and no chain default), `default` also runs as
+  a fallback for the unresolvable value — only when there's no `default` does the substitution error propagate
+  (with the case list appended). Cases are stored in a `BTreeMap` so error-message ordering is deterministic
+  (alphabetical). `count_leaves` sums every case + default (worst case, like `if`'s both-branches counting).
 - Encrypted env vars use AES-256-GCM with the format `encrypted:<base64(nonce||ciphertext||tag)>`. Decryption happens
   in-memory inside `build_env()` — decrypted secrets never touch disk.
 - Each encrypted `.env` file contains a `RUNFILE_ENCRYPTION_PUBLIC_KEY` variable — a SHA-256 fingerprint of the private

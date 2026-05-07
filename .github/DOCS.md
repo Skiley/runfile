@@ -632,7 +632,8 @@ Each entry in a `commands` array can be either:
 - a **shell command string** — runs through the resolved shell, same as today, or
 - a **target invocation** — a string starting with `@` (see [Target invocations](#target-invocations--target-args)), or
 - an **`if` block** — conditional execution, or
-- a **`for` block** — iteration.
+- a **`for` block** — iteration, or
+- a **`match` block** — multi-way dispatch on a substituted value (with built-in case validation).
 
 These blocks are evaluated by Runfile itself, so they are cross-platform and cross-shell by default. Conditions are
 parsed at Runfile load time, so syntax errors fail fast.
@@ -739,6 +740,56 @@ For an exhaustive table of target invocation semantics (no dedup, env layering, 
 > *known* names) treats dynamic names as a single leaf with no recursion —
 > the runtime counter bumps the total via `add_to_total` if the dispatched
 > target turns out to expose more steps.
+
+### `match` blocks
+
+Multi-way dispatch on a substituted value. Equivalent to a chain of `if` / `else if` / `else` blocks but with a
+clearer error story when the value doesn't match any case (and no `default` is configured).
+
+```jsonc
+"commands": [
+  {
+    "match": "$(ARGS.tier ? 1)",  // chained substitution → defaults to "1" when --tier missing
+    "cases": {
+      "1": "flutter emulators --launch Tier_1_Android_9_SDK_28_1GB",
+      "2": "flutter emulators --launch Tier_2_Android_11_SDK_30_2GB",
+      "3": ["echo bringing up tier 3", "flutter emulators --launch Tier_3_Android_14_SDK_34_4GB"]
+    }
+  },
+  "adb wait-for-device",
+  "flutter run"
+]
+```
+
+| Field          | Type                                 | Required | Description                                                                                                                                                                                                                                          |
+|----------------|--------------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `match`        | `string`                             | Yes      | The substitution template whose resolved value selects a case. Goes through the same substitution pipeline as any other `$(...)` reference, so chained fallbacks (`$(ARGS.tier ? ENV.TIER ? 1)`) and all source kinds (`ARGS`, `ENV`, `LOOP`, `RUN`) work. |
+| `cases`        | `object<string, string \| commandStep[]>` | Yes (or `default`) | Map from case value (compared as a string against the resolved match value) to the steps to run. Each value is either a single shell-command string (sugar for a one-element array) or an array of command steps.                                                                                       |
+| `default`      | `string \| commandStep[]`            | No       | Steps run when no case matches the resolved value. Also runs when the `match` substitution itself fails (e.g. missing arg with no chain default). When omitted, an unmatched value is a hard error that lists the valid cases.                       |
+| `ignoreErrors` | `boolean`                            | No       | When true, failures inside the chosen branch do not flip the run's success state.                                                                                                                                                                    |
+| `when`         | `"success" \| "failure" \| "always"` | No       | State guard for the entire `match` block. Default `"success"`. See [When-guarded blocks](#when-guarded-blocks-when).                                                                                                                                 |
+
+**Match semantics.** The `match` template is substituted, then the resolved string is looked up in `cases` by exact
+equality. A case match runs that case's steps. Otherwise, `default` runs if set. Without `default`, an unmatched
+value surfaces an error like:
+
+```
+No case matched value "5" for `match` "$(ARGS.tier)"
+  Valid cases: "1", "2", "3", "4"
+```
+
+When the substitution itself fails (e.g. `$(ARGS.tier)` with no `--tier` flag and no chain default), `default` runs
+if present; otherwise the error message includes the valid cases too — so users always know what values they can
+pass:
+
+```
+Could not resolve value for `match` "$(ARGS.tier)": Argument "tier" was not provided …
+  Valid cases: "1", "2", "3", "4"
+```
+
+Use chained substitution in `match` for a default *value* (`$(ARGS.tier ? 1)`) and `default` for a fallback
+*branch* — they compose. Cases iterate in alphabetical order in error messages (because internally they're stored
+in a sorted map).
 
 ### `$(LOOP.var)` — loop variable substitution
 

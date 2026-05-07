@@ -3478,3 +3478,221 @@ fn target_call_with_question_mark_in_name_rejected() {
 	let err = parse_runfile(json).unwrap_err().to_string();
 	assert!(err.contains("?"), "got: {err}");
 }
+
+// ── Match step tests ──────────────────────────────────────────────
+
+#[test]
+fn parse_match_block() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"emulate": {
+				"commands": [
+					{
+						"match": "$(ARGS.tier)",
+						"cases": {
+							"1": "echo tier 1",
+							"2": ["echo tier 2", "echo two"]
+						}
+					}
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::Match(m) = &rf.targets["emulate"].commands[0] {
+		assert_eq!(m.r#match, "$(ARGS.tier)");
+		assert_eq!(m.cases.len(), 2);
+		assert_eq!(m.cases["1"], vec![CommandStep::shell("echo tier 1")]);
+		assert_eq!(
+			m.cases["2"],
+			vec![CommandStep::shell("echo tier 2"), CommandStep::shell("echo two")]
+		);
+		assert!(m.default.is_none());
+	} else {
+		panic!("expected Match block");
+	}
+}
+
+#[test]
+fn parse_match_with_default_and_target_call() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"a": { "commands": ["echo a"] },
+			"dispatch": {
+				"commands": [
+					{
+						"match": "$(ARGS.mode ? prod)",
+						"cases": {
+							"prod": "@a",
+							"dev": ["echo dev"]
+						},
+						"default": "echo unknown"
+					}
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::Match(m) = &rf.targets["dispatch"].commands[0] {
+		assert_eq!(m.r#match, "$(ARGS.mode ? prod)");
+		// String case "prod" parsed as `@a` → TargetCall.
+		assert!(matches!(&m.cases["prod"][0], CommandStep::TargetCall(c) if c.target == "a"));
+		let default = m.default.as_ref().expect("default should be set");
+		assert_eq!(default, &vec![CommandStep::shell("echo unknown")]);
+	} else {
+		panic!("expected Match block");
+	}
+}
+
+#[test]
+fn parse_match_when_and_ignore_errors() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{
+						"match": "$(ARGS.x)",
+						"cases": { "a": "echo a" },
+						"when": "always",
+						"ignoreErrors": true
+					}
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::Match(m) = &rf.targets["t"].commands[0] {
+		assert_eq!(m.when, Some(WhenCondition::Always));
+		assert_eq!(m.ignore_errors, Some(true));
+	} else {
+		panic!("expected Match block");
+	}
+}
+
+#[test]
+fn parse_match_empty_match_expression_rejected() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{ "match": "", "cases": { "a": "echo a" } }
+				]
+			}
+		}
+	}"#;
+	let err = parse_runfile(json).unwrap_err();
+	assert!(matches!(err, ParseError::EmptyMatchExpression(_)), "got: {err:?}");
+}
+
+#[test]
+fn parse_match_no_cases_no_default_rejected() {
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{ "match": "$(ARGS.x)", "cases": {} }
+				]
+			}
+		}
+	}"#;
+	let err = parse_runfile(json).unwrap_err();
+	assert!(matches!(err, ParseError::EmptyMatchCases(_)), "got: {err:?}");
+}
+
+#[test]
+fn parse_match_default_only_is_allowed() {
+	// Edge case: an empty `cases` map paired with a `default` is essentially
+	// "always run default" — silly but not invalid.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{ "match": "$(ARGS.x ? y)", "cases": {}, "default": "echo y" }
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	if let CommandStep::Match(m) = &rf.targets["t"].commands[0] {
+		assert!(m.cases.is_empty());
+		assert!(m.default.is_some());
+	} else {
+		panic!("expected Match block");
+	}
+}
+
+#[test]
+fn parse_match_unknown_field_rejected() {
+	// deny_unknown_fields applies — typos should fail loudly.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{ "match": "$(ARGS.x)", "cases": { "a": "echo a" }, "extra": true }
+				]
+			}
+		}
+	}"#;
+	assert!(parse_runfile(json).is_err());
+}
+
+#[test]
+fn parse_match_round_trips_through_serde() {
+	// Parse → serialize → parse must produce the same tree.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{
+						"match": "$(ARGS.x)",
+						"cases": { "a": "echo a", "b": ["echo b1", "echo b2"] },
+						"default": "echo other"
+					}
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	let serialized = serde_json::to_string(&rf).unwrap();
+	assert!(
+		serialized.contains("\"match\":\"$(ARGS.x)\""),
+		"serialized: {serialized}"
+	);
+	let rf2 = parse_runfile(&serialized).unwrap();
+	assert_eq!(rf.targets["t"].commands, rf2.targets["t"].commands);
+}
+
+#[test]
+fn match_walks_templates_inside_cases_and_default() {
+	// `walk_step_templates` should visit the match template, every case body,
+	// and the default body so static analysis (arg-usage scanning) sees
+	// `$(ARGS.*)` references inside them.
+	let json = r#"{
+		"$schema": "x",
+		"targets": {
+			"t": {
+				"commands": [
+					{
+						"match": "$(ARGS.tier)",
+						"cases": { "1": "echo $(ARGS.foo)" },
+						"default": "echo $(ARGS.bar)"
+					}
+				]
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	let mut seen: Vec<String> = Vec::new();
+	walk_step_templates(&rf.targets["t"].commands, &mut |t| seen.push(t.to_string()));
+	assert!(seen.iter().any(|s| s == "$(ARGS.tier)"), "saw: {seen:?}");
+	assert!(seen.iter().any(|s| s == "echo $(ARGS.foo)"), "saw: {seen:?}");
+	assert!(seen.iter().any(|s| s == "echo $(ARGS.bar)"), "saw: {seen:?}");
+}

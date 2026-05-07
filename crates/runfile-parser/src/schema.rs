@@ -1,12 +1,13 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::dsl::DslExpr;
 
 /// A step in a `commands` array. Either a raw shell command, a target
-/// invocation (`@target args`), a `when`-guarded block, an `if`-block, or a
-/// `for`-block. Backwards compatible with plain-string arrays: any string
-/// without a leading `@` deserializes as `CommandStep::Shell`.
+/// invocation (`@target args`), a `when`-guarded block, an `if`-block, a
+/// `for`-block, or a `match`-block. Backwards compatible with plain-string
+/// arrays: any string without a leading `@` deserializes as
+/// `CommandStep::Shell`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandStep {
 	/// A raw shell command string (the original Runfile shape).
@@ -22,6 +23,10 @@ pub enum CommandStep {
 	If(IfStep),
 	/// Iteration over an inline array, glob, or shell output.
 	For(ForStep),
+	/// Multi-way dispatch on a substituted value. Equivalent to a chain of
+	/// `if` / `else if` / `else` blocks but with a clearer error story when
+	/// the value doesn't match any case (and no default is configured).
+	Match(MatchStep),
 }
 
 impl Serialize for CommandStep {
@@ -43,6 +48,7 @@ impl Serialize for CommandStep {
 			CommandStep::When(when_step) => when_step.serialize(serializer),
 			CommandStep::If(if_step) => if_step.serialize(serializer),
 			CommandStep::For(for_step) => for_step.serialize(serializer),
+			CommandStep::Match(match_step) => match_step.serialize(serializer),
 		}
 	}
 }
@@ -129,18 +135,22 @@ impl<'de> Deserialize<'de> for CommandStep {
 				} else if map.contains_key("for") {
 					let step: ForStep = serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom)?;
 					Ok(CommandStep::For(step))
+				} else if map.contains_key("match") {
+					let step: MatchStep =
+						serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom)?;
+					Ok(CommandStep::Match(step))
 				} else if map.contains_key("commands") {
 					let step: WhenStep =
 						serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom)?;
 					Ok(CommandStep::When(step))
 				} else {
 					Err(serde::de::Error::custom(
-						"command step object must contain an \"if\", \"for\", or \"commands\" key",
+						"command step object must contain an \"if\", \"for\", \"match\", or \"commands\" key",
 					))
 				}
 			}
 			_ => Err(serde::de::Error::custom(
-				"command step must be a string or an object with an \"if\", \"for\", or \"commands\" key",
+				"command step must be a string or an object with an \"if\", \"for\", \"match\", or \"commands\" key",
 			)),
 		}
 	}
@@ -295,18 +305,38 @@ impl CommandStep {
 					step.walk_templates(visit);
 				}
 			}
+			CommandStep::Match(MatchStep {
+				r#match,
+				cases,
+				default,
+				..
+			}) => {
+				visit(r#match.as_str());
+				for steps in cases.values() {
+					for step in steps {
+						step.walk_templates(visit);
+					}
+				}
+				if let Some(default_steps) = default {
+					for step in default_steps {
+						step.walk_templates(visit);
+					}
+				}
+			}
 		}
 	}
 
 	/// The step's effective `when` condition. Returns `Success` for steps that
 	/// don't carry a `when` (plain shells, target calls). For `WhenStep`, `IfStep`,
-	/// and `ForStep`, returns the configured value (defaulting to `Success`).
+	/// `ForStep`, and `MatchStep`, returns the configured value (defaulting to
+	/// `Success`).
 	pub fn effective_when(&self) -> WhenCondition {
 		match self {
 			CommandStep::Shell(_) | CommandStep::TargetCall(_) => WhenCondition::Success,
 			CommandStep::When(w) => w.when,
 			CommandStep::If(i) => i.when.unwrap_or_default(),
 			CommandStep::For(f) => f.when.unwrap_or_default(),
+			CommandStep::Match(m) => m.when.unwrap_or_default(),
 		}
 	}
 }
@@ -624,6 +654,89 @@ pub struct ForStep {
 	/// State guard for the entire `for` block. See [`WhenCondition`].
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub when: Option<WhenCondition>,
+}
+
+/// A `match`-block within a `commands` array.
+///
+/// Resolves the `match` template through the normal substitution pipeline
+/// (so `$(ARGS.x)`, `$(ENV.X)`, `$(LOOP.x)`, chained fallbacks, etc. work),
+/// then dispatches on string equality against `cases`. When no case matches
+/// and no `default` is set, execution errors out — listing the valid cases
+/// in the message — so users learn about valid values rather than silently
+/// running through to subsequent steps.
+///
+/// Cases are stored in a [`BTreeMap`] so iteration order is deterministic
+/// (alphabetical by key); error messages list valid values in that order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MatchStep {
+	/// The substitution template to evaluate. Goes through the same
+	/// substitution pipeline as any other `$(...)` reference, so chained
+	/// fallbacks (`$(ARGS.tier ? ENV.TIER ? 1)`) and all source kinds are
+	/// supported.
+	#[serde(rename = "match")]
+	pub r#match: String,
+
+	/// Map from case value (compared against the resolved match value as a
+	/// string) to the steps to run for that case. Each value accepts the
+	/// usual string-or-array sugar.
+	#[serde(deserialize_with = "deserialize_match_cases")]
+	pub cases: BTreeMap<String, Vec<CommandStep>>,
+
+	/// Steps run when no case matches the resolved value. Optional — when
+	/// absent, an unmatched value is a hard error that lists the valid
+	/// cases. Accepts the usual string-or-array sugar.
+	#[serde(
+		default,
+		skip_serializing_if = "Option::is_none",
+		deserialize_with = "deserialize_optional_steps_or_string"
+	)]
+	pub default: Option<Vec<CommandStep>>,
+
+	/// When true, failures inside the chosen branch do not flip the run's
+	/// success state. Same semantics as `if.ignoreErrors` /
+	/// `for.ignoreErrors` / `when.ignoreErrors`.
+	#[serde(default, rename = "ignoreErrors", skip_serializing_if = "Option::is_none")]
+	pub ignore_errors: Option<bool>,
+
+	/// State guard for the entire `match` block. Default (or `Some(Success)`)
+	/// means the block runs only while no prior failure.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub when: Option<WhenCondition>,
+}
+
+/// Deserialize `MatchStep.cases`: a JSON object whose values may each be a
+/// single shell-command string or an array of [`CommandStep`]s. Mirrors the
+/// `then` / `else` / `do` shorthand of [`IfStep`] and [`ForStep`].
+fn deserialize_match_cases<'de, D>(deserializer: D) -> Result<BTreeMap<String, Vec<CommandStep>>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	use serde_json::Value;
+
+	let value = Value::deserialize(deserializer)?;
+	let obj = match value {
+		Value::Object(m) => m,
+		_ => return Err(serde::de::Error::custom("`cases` must be an object")),
+	};
+
+	let mut out = BTreeMap::new();
+	for (key, val) in obj {
+		let steps = match val {
+			Value::String(s) => {
+				let step = command_step_from_string(s).map_err(serde::de::Error::custom)?;
+				vec![step]
+			}
+			Value::Array(_) => serde_json::from_value::<Vec<CommandStep>>(val).map_err(serde::de::Error::custom)?,
+			other => {
+				return Err(serde::de::Error::custom(format!(
+					"case \"{key}\" must be a shell-command string or array of command steps, got {other}"
+				)));
+			}
+		};
+		out.insert(key, steps);
+	}
+	Ok(out)
 }
 
 /// Top-level Runfile specification.

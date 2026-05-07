@@ -1,5 +1,7 @@
 use crate::args::{check_env_case_duplicates, LoopScope, RunArgs, SubstitutionError};
-use crate::control_flow::{count_leaves, evaluate_if_condition, expand_for_iterations, ControlFlowError};
+use crate::control_flow::{
+	count_leaves, evaluate_if_condition, expand_for_iterations, resolve_match_branch, ControlFlowError,
+};
 use crate::env::{build_env_with_base, EnvFileError};
 use crate::force_kill::ForceKillGuard;
 use crate::logging::{is_logging_enabled, log_command, log_command_timing, log_parallel_command, StepCounter};
@@ -7,7 +9,9 @@ use crate::parallel_output::{
 	flush_writer_thread, format_parallel_prefix, line_prefixing_enabled, spawn_line_pump, OutputStream,
 };
 use crate::stdio_tailer::StdioTailerSet;
-use runfile_parser::{CommandSpec, CommandStep, ExtendStdio, ForStep, IfStep, TargetCallStep, WhenCondition, WhenStep};
+use runfile_parser::{
+	CommandSpec, CommandStep, ExtendStdio, ForStep, IfStep, MatchStep, TargetCallStep, WhenCondition, WhenStep,
+};
 use runfile_shell::ResolvedShell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -411,6 +415,20 @@ fn execute_steps_walk(
 				deps,
 				state,
 			)?,
+			CommandStep::Match(match_step) => execute_match_block(
+				match_step,
+				setup,
+				shell,
+				args,
+				working_dir,
+				timings,
+				counter,
+				force_kill_guard,
+				loop_scope,
+				in_parallel,
+				deps,
+				state,
+			)?,
 		}
 
 		// If anything in this step incremented the failure counter and the
@@ -689,6 +707,67 @@ fn execute_if_block(
 	if local_ignore {
 		// Swallow everything internal: neither the failure count, the
 		// failed flag, nor a walk error propagate.
+		let _ = walk;
+		return Ok(());
+	}
+
+	state.failed = state.failed || local_state.failed;
+	state.failures += local_state.failures;
+	walk
+}
+
+/// Execute a `match` block: resolve the match value, dispatch to the
+/// matching case (or `default`, or surface a no-match error), and walk the
+/// chosen branch. Mirrors [`execute_if_block`]'s isolation semantics:
+/// `ignoreErrors: true` fully isolates the chosen branch's failures from
+/// the outer state; otherwise the branch's failure count and `failed` flag
+/// merge into the outer walker.
+#[allow(clippy::too_many_arguments)]
+fn execute_match_block(
+	match_step: &MatchStep,
+	setup: &ExecSetup,
+	shell: &ResolvedShell,
+	args: &RunArgs,
+	working_dir: &Path,
+	timings: bool,
+	counter: &StepCounter,
+	force_kill_guard: &Option<ForceKillGuard>,
+	loop_scope: &mut LoopScope,
+	in_parallel: bool,
+	deps: &dyn DependencyResolver,
+	state: &mut WalkState,
+) -> Result<(), ExecuteError> {
+	let chosen_branch = resolve_match_branch(match_step, args, &setup.env, loop_scope)?;
+
+	let local_ignore = match_step.ignore_errors.unwrap_or(false);
+	let entered_in_failure_mode = match_step.when.unwrap_or_default() != WhenCondition::Success;
+	let mut local_state = WalkState {
+		commands_run: 0,
+		failures: 0,
+		last_status: None,
+		failed: if entered_in_failure_mode { false } else { state.failed },
+	};
+
+	let walk = execute_steps_walk(
+		chosen_branch,
+		setup,
+		shell,
+		args,
+		working_dir,
+		timings,
+		counter,
+		force_kill_guard,
+		loop_scope,
+		in_parallel,
+		deps,
+		&mut local_state,
+	);
+
+	state.commands_run += local_state.commands_run;
+	state.last_status = local_state.last_status.or(state.last_status);
+
+	if local_ignore {
+		// Swallow everything internal: failure count, failed flag, walk error.
 		let _ = walk;
 		return Ok(());
 	}
@@ -1025,6 +1104,12 @@ fn collect_leaves_parallel_with_when(
 					loop_scope.pop();
 					r?;
 				}
+			}
+			CommandStep::Match(match_step) => {
+				// Like `if`, pick the chosen branch eagerly using the current
+				// substitution context and only collect that branch's leaves.
+				let branch = resolve_match_branch(match_step, args, &setup.env, loop_scope)?;
+				collect_leaves_parallel_with_when(branch, setup, args, working_dir, loop_scope, effective, out)?;
 			}
 		}
 	}

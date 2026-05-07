@@ -13,7 +13,9 @@
 
 use crate::args::{LoopScope, RunArgs, SubstitutionError};
 use globset::{Glob, GlobSetBuilder};
-use runfile_parser::{walk_step_templates, CommandStep, DslExpr, DslValue, ForStep, IfStep, WhenCondition, WhenStep};
+use runfile_parser::{
+	walk_step_templates, CommandStep, DslExpr, DslValue, ForStep, IfStep, MatchStep, WhenCondition, WhenStep,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -38,6 +40,21 @@ pub enum ControlFlowError {
 
 	#[error("Failed to walk filesystem for `for glob` pattern \"{0}\": {1}")]
 	GlobWalk(String, String),
+
+	#[error("Could not resolve value for `match` \"{match_expr}\": {source}\n  Valid cases: {valid_cases}")]
+	MatchValueUnresolved {
+		match_expr: String,
+		valid_cases: String,
+		#[source]
+		source: SubstitutionError,
+	},
+
+	#[error("No case matched value \"{value}\" for `match` \"{match_expr}\"\n  Valid cases: {valid_cases}")]
+	MatchNoCase {
+		match_expr: String,
+		value: String,
+		valid_cases: String,
+	},
 }
 
 /// Resolve a [`DslValue`] to a string against the current substitution context.
@@ -260,6 +277,71 @@ fn expand_shell(
 	Ok(lines)
 }
 
+/// Format the keys of a match step's `cases` as a comma-separated list.
+/// Used in error messages so the user knows what the valid values are.
+/// Cases are stored in a `BTreeMap`, so ordering is alphabetical and stable.
+fn format_match_cases(step: &MatchStep) -> String {
+	if step.cases.is_empty() {
+		return "(none)".to_string();
+	}
+	step.cases
+		.keys()
+		.map(|k| format!("\"{k}\""))
+		.collect::<Vec<_>>()
+		.join(", ")
+}
+
+/// Resolve which branch of a `match` step to execute.
+///
+/// 1. Substitute the `match` template against the current substitution
+///    context. Substitution failure is surfaced as
+///    [`ControlFlowError::MatchValueUnresolved`] with the list of valid
+///    cases attached so the user can fix the missing value or correct the
+///    substitution chain.
+/// 2. Look up the resolved value in `cases`. A match runs the case body.
+/// 3. Otherwise, run `default` (if set), or surface
+///    [`ControlFlowError::MatchNoCase`].
+///
+/// Returns `Some(branch)` when a branch was chosen (case match or default),
+/// or `None` when the step has nothing to do (no case matched and no
+/// default set — in which case the caller already produced the error).
+pub fn resolve_match_branch<'a>(
+	step: &'a MatchStep,
+	args: &RunArgs,
+	env: &HashMap<String, String>,
+	loop_scope: &LoopScope,
+) -> Result<&'a [CommandStep], ControlFlowError> {
+	let resolved = match args.substitute_with_loop(&step.r#match, env, loop_scope) {
+		Ok(v) => v,
+		Err(e) => {
+			// Substitution failed — fall through to default if present so
+			// users can write a `default` branch that handles the missing
+			// case explicitly. Otherwise surface a richer error that lists
+			// the valid cases.
+			if let Some(default) = step.default.as_deref() {
+				return Ok(default);
+			}
+			return Err(ControlFlowError::MatchValueUnresolved {
+				match_expr: step.r#match.clone(),
+				valid_cases: format_match_cases(step),
+				source: e,
+			});
+		}
+	};
+
+	if let Some(branch) = step.cases.get(&resolved) {
+		return Ok(branch.as_slice());
+	}
+	if let Some(default) = step.default.as_deref() {
+		return Ok(default);
+	}
+	Err(ControlFlowError::MatchNoCase {
+		match_expr: step.r#match.clone(),
+		value: resolved,
+		valid_cases: format_match_cases(step),
+	})
+}
+
 /// Static count of leaf shell commands inside a slice of [`CommandStep`]s.
 ///
 /// - `Shell` → 1
@@ -269,6 +351,8 @@ fn expand_shell(
 /// - `For glob` / `For shell` → `body_count` (1-iteration estimate; the
 ///   runtime calls [`crate::logging::StepCounter::add_to_total`] to bump
 ///   the total dynamically when actual iterations exceed the estimate).
+/// - `Match` → `sum(case.len()) + default.len()` (worst case — only one
+///   branch runs but we don't know which).
 pub fn count_leaves(steps: &[CommandStep]) -> usize {
 	let mut total = 0;
 	for step in steps {
@@ -309,6 +393,16 @@ fn count_leaves_one(step: &CommandStep) -> usize {
 				// shared total at runtime if more iterations actually expand.
 				Some(runfile_parser::ForInValue::Namespaces) | None => body_count,
 			}
+		}
+		CommandStep::Match(MatchStep { cases, default, .. }) => {
+			let mut total = 0;
+			for case in cases.values() {
+				total += count_leaves(case);
+			}
+			if let Some(default_steps) = default {
+				total += count_leaves(default_steps);
+			}
+			total
 		}
 	}
 }
@@ -417,6 +511,12 @@ fn collect_detach_leaves_inner(
 					loop_scope.pop();
 					r?;
 				}
+			}
+			CommandStep::Match(match_step) => {
+				// Same approach as `if`: pick the matching branch using the
+				// current substitution context and only collect that one.
+				let branch = resolve_match_branch(match_step, args, env, loop_scope)?;
+				collect_detach_leaves_inner(branch, args, env, working_dir, loop_scope, out)?;
 			}
 		}
 	}

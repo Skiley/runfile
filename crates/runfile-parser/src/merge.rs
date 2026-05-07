@@ -567,6 +567,14 @@ fn rewrite_target_calls_in_steps(steps: &mut [CommandStep], namespace: &str) {
 				}
 			}
 			CommandStep::For(f) => rewrite_target_calls_in_steps(&mut f.body, namespace),
+			CommandStep::Match(m) => {
+				for steps in m.cases.values_mut() {
+					rewrite_target_calls_in_steps(steps, namespace);
+				}
+				if let Some(default) = m.default.as_mut() {
+					rewrite_target_calls_in_steps(default, namespace);
+				}
+			}
 		}
 	}
 }

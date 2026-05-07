@@ -182,14 +182,21 @@ required values.
 
 #### Conditionals and loops, no shell required
 
-Drop `if` / `for` blocks straight into your `commands` array. Conditions and loops are evaluated by Runfile itself,
-so the logic works the same on every shell and platform.
+Drop `if` / `for` / `match` blocks straight into your `commands` array. Conditions, loops, and value dispatch are
+evaluated by Runfile itself, so the logic works the same on every shell and platform.
 
 ```jsonc
 "commands": [
   { "if": "$(ARGS.env) == production",
     "then": ["./deploy-prod.sh"],
     "else": ["./deploy-staging.sh"] },
+
+  { "match": "$(ARGS.tier ? 1)",  // chain default; case "1" runs when --tier missing
+    "cases": {
+      "1": "flutter emulators --launch Tier_1_Android_9",
+      "2": "flutter emulators --launch Tier_2_Android_11",
+      "3": "flutter emulators --launch Tier_3_Android_14"
+    } },                          // unknown values error out, listing the valid cases
 
   { "for": "service",
     "in": ["api", "web", "worker"],
