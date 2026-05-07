@@ -93,8 +93,9 @@ runs:
       run: |
         cargo build
         bin_dir="$GITHUB_WORKSPACE/target/debug"
+        if [ "$RUNNER_OS" = "Windows" ]; then bin="$bin_dir/run.exe"; else bin="$bin_dir/run"; fi
         echo "$bin_dir" >> "$GITHUB_PATH"
-        "$bin_dir"/run* --version
+        "$bin" --version
 
     # Linux runners ship without a Secret Service daemon. The `keyring` crate's
     # linux-native backend talks to gnome-keyring over D-Bus, so we install both
