@@ -136,6 +136,23 @@ pub fn local_dir_from_merge(result: &MergeResult) -> PathBuf {
 	std::env::current_dir().unwrap_or_default()
 }
 
+/// Helper to get the local runfile *file path* from a MergeResult. Used to
+/// populate `{{ RUN.file }}` for targets that come from the local Runfile
+/// (i.e. don't have an entry in `target_sources` because they're not in the
+/// merged runfile, or for the top-level fallback). Returns the synthetic
+/// `<cwd>/Runfile.json` path when no local source is present (e.g. when the
+/// run is driven entirely by global files).
+pub fn local_file_from_merge(result: &MergeResult) -> PathBuf {
+	for (path, kind) in result.target_sources.values() {
+		if *kind == SourceKind::Local {
+			return path.clone();
+		}
+	}
+	std::env::current_dir()
+		.unwrap_or_default()
+		.join(runfile_parser::RUNFILE_NAME)
+}
+
 /// Canonicalize and strip Windows UNC prefix.
 pub fn canonicalize_clean(path: &std::path::Path) -> PathBuf {
 	let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());

@@ -8,7 +8,7 @@ use crate::executor::{
 use crate::logging::{log_command, log_target_timing, StepCounter};
 use runfile_parser::{
 	walk_spec_aux_templates, CommandStep, ForInValue, ForStep, IfStep, MatchStep, Runfile, WhenStep,
-	WORKING_DIRECTORY_CWD, WORKING_DIRECTORY_RUNFILE_PARENT,
+	WORKING_DIRECTORY_DEFAULT,
 };
 use runfile_shell::{resolve_shell, ResolvedShell};
 use std::collections::{HashMap, HashSet};
@@ -39,11 +39,6 @@ pub enum RunError {
 
 	#[error("{0}")]
 	Detach(#[from] DetachFlattenError),
-
-	#[error(
-		"Target \"{0}\" has invalid `workingDirectory` value \"{1}\" — must be \"runfileParent\" or \"cwd\" (after substitution)."
-	)]
-	InvalidWorkingDirectory(String, String),
 }
 
 /// Shared root state for an entire run. Holds immutable references plus
@@ -59,9 +54,11 @@ struct RunRoot<'a> {
 	runfile: &'a Runfile,
 	shell: &'a ResolvedShell,
 	base_args: &'a RunArgs,
+	runfile_path: &'a Path,
 	runfile_dir: &'a Path,
 	caller_cwd: &'a Path,
 	source_dirs: &'a HashMap<String, PathBuf>,
+	source_files: &'a HashMap<String, PathBuf>,
 	timings: bool,
 	yes: bool,
 	available_private_keys: Option<&'a [String]>,
@@ -75,6 +72,17 @@ impl RunRoot<'_> {
 			.get(target_name)
 			.map(|p| p.as_path())
 			.unwrap_or(self.runfile_dir)
+	}
+
+	/// Get the source file path for a target, falling back to the main
+	/// runfile_path. Used to populate `{{ RUN.file }}` per-target so a
+	/// dispatched `@target` defined in an included file resolves the path
+	/// of that include, not the entrypoint.
+	fn target_file(&self, target_name: &str) -> &Path {
+		self.source_files
+			.get(target_name)
+			.map(|p| p.as_path())
+			.unwrap_or(self.runfile_path)
 	}
 }
 
@@ -141,6 +149,12 @@ impl DependencyResolver for RunnerDependencyResolver<'_> {
 }
 
 /// Execute a target by name, resolving `@target` dependencies along the way.
+///
+/// `working_dir` is taken to be the parent directory of the entrypoint
+/// Runfile and is also used as the caller's CWD; the synthetic entrypoint
+/// path is `working_dir/Runfile.json` (used to populate `{{ RUN.file }}`).
+/// For full control over `caller_cwd`, source dirs/files, etc., use
+/// [`run_target_with_cwd`].
 pub fn run_target(
 	target_name: &str,
 	runfile: &Runfile,
@@ -148,13 +162,16 @@ pub fn run_target(
 	args: &RunArgs,
 	working_dir: &Path,
 ) -> Result<ExecutionResult, RunError> {
+	let synthetic_path = working_dir.join(runfile_parser::RUNFILE_NAME);
 	run_target_with_cwd(
 		target_name,
 		runfile,
 		shell,
 		args,
+		&synthetic_path,
 		working_dir,
 		working_dir,
+		&HashMap::new(),
 		&HashMap::new(),
 		false,
 		false,
@@ -163,32 +180,44 @@ pub fn run_target(
 }
 
 /// Execute a target by name, with separate runfile dir and caller CWD.
-/// `source_dirs` maps target names to their source Runfile's parent directory
-/// (used when targets come from different files, e.g. global files).
+/// `source_dirs` maps target names to their source Runfile's parent directory,
+/// `source_files` maps target names to the source Runfile *path* (used to
+/// populate `{{ RUN.file }}` / `{{ RUN.parent }}` per-target). Both matter
+/// when targets come from different files (e.g. global files, `includes`).
 ///
 /// The caller's `args.run_context` is used as the baseline for `{{ RUN.* }}`
-/// resolution; the runner rewrites `run_context.shell` internally if a
-/// target's `forceShell` substitution resolves to a different shell than
-/// the caller's, so users always see the shell that actually runs their
-/// commands.
+/// resolution; the runner rewrites `run_context.shell` / `file` / `parent`
+/// internally per-target so users always see values that match the
+/// currently-executing target.
 #[allow(clippy::too_many_arguments)]
 pub fn run_target_with_cwd(
 	target_name: &str,
 	runfile: &Runfile,
 	shell: &ResolvedShell,
 	args: &RunArgs,
+	runfile_path: &Path,
 	runfile_dir: &Path,
 	caller_cwd: &Path,
 	source_dirs: &HashMap<String, PathBuf>,
+	source_files: &HashMap<String, PathBuf>,
 	timings: bool,
 	yes: bool,
 	available_private_keys: Option<&[String]>,
 ) -> Result<ExecutionResult, RunError> {
 	// Make sure the run_context is in sync with the resolved shell the caller
 	// decided on AND carries the merged Runfile's namespace list (for `for
-	// "in": "namespaces"` resolution). Both checks are idempotent: nothing
-	// gets cloned when the caller already set them.
-	let args_owned = ensure_run_context(args, &shell.kind, &runfile.namespaces);
+	// "in": "namespaces"` resolution), plus baseline `cwd`/`file`/`parent`
+	// values for `{{ RUN.* }}` substitution. The runner refreshes
+	// `file`/`parent` per-target downstream — these top-level values are the
+	// fallback for targets without a `source_files` / `source_dirs` entry.
+	let args_owned = ensure_run_context(
+		args,
+		&shell.kind,
+		&runfile.namespaces,
+		caller_cwd,
+		runfile_path,
+		runfile_dir,
+	);
 	let args = args_owned.as_ref().unwrap_or(args);
 
 	// Collect all template strings from the target and its dependencies for
@@ -209,9 +238,11 @@ pub fn run_target_with_cwd(
 		runfile,
 		shell,
 		base_args: args,
+		runfile_path,
 		runfile_dir,
 		caller_cwd,
 		source_dirs,
+		source_files,
 		timings,
 		yes,
 		available_private_keys,
@@ -280,6 +311,13 @@ fn run_target_inner_body(
 	// parent's env, not the target's own envFiles.
 	let pre_env: HashMap<String, String> = parent_env.cloned().unwrap_or_default();
 
+	// Per-target view of `RUN.file` / `RUN.parent`: the source Runfile of
+	// *this* target (relevant when the target came from an included or global
+	// file). `RUN.cwd` is the run-wide caller cwd already set by the
+	// top-level `ensure_run_context`.
+	let target_runfile_dir = root.target_dir(target_name);
+	let target_runfile_file = root.target_file(target_name);
+
 	// Substitute and resolve `forceShell`. `forceShell` is target-level
 	// config and is NOT inherited from the parent across an `@target` call —
 	// each target picks its own shell.
@@ -293,33 +331,28 @@ fn run_target_inner_body(
 	};
 	let shell = effective_shell.as_ref().unwrap_or(root.shell);
 
-	// Update args.run_context.shell if the target's effective shell differs
-	// from the parent's. This makes `{{ RUN.shell }}` reflect the shell that
-	// actually runs the commands, even when a `forceShell` override applies.
-	// The namespace list is unchanged at this point — the top-level call
-	// already attached it, so we re-pass the same slice for the in-sync check.
-	let target_args_owned = ensure_run_context(args, &shell.kind, &root.runfile.namespaces);
+	// Update args.run_context.shell / file / parent so `{{ RUN.shell }}`,
+	// `{{ RUN.file }}`, and `{{ RUN.parent }}` reflect the currently-executing
+	// target. The namespace list is unchanged at this point — the top-level
+	// call already attached it, so we re-pass the same slice for the in-sync
+	// check.
+	let target_args_owned = ensure_run_context(
+		args,
+		&shell.kind,
+		&root.runfile.namespaces,
+		root.caller_cwd,
+		target_runfile_file,
+		target_runfile_dir,
+	);
 	let target_args: &RunArgs = target_args_owned.as_ref().unwrap_or(args);
 
-	// Substitute and validate `workingDirectory`. The substituted value must
-	// be exactly `runfileParent` or `cwd`.
-	let resolved_working_directory: Option<String> = match spec.working_directory.as_ref() {
-		Some(template) => Some(target_args.substitute(template, &pre_env)?),
-		None => None,
-	};
-	let effective_working_dir = {
-		let target_runfile_dir = root.target_dir(target_name);
-		match resolved_working_directory.as_deref() {
-			Some(WORKING_DIRECTORY_CWD) => root.caller_cwd.to_path_buf(),
-			Some(WORKING_DIRECTORY_RUNFILE_PARENT) | None => target_runfile_dir.to_path_buf(),
-			Some(other) => {
-				return Err(RunError::InvalidWorkingDirectory(
-					target_name.to_string(),
-					other.to_string(),
-				));
-			}
-		}
-	};
+	// `workingDirectory` is a free-form path that supports `{{ ... }}`
+	// substitution. Default (when unset) is `{{ RUN.parent }}` — the target's
+	// source Runfile directory. After substitution, relative paths are
+	// resolved against that same directory.
+	let working_directory_template = spec.working_directory.as_deref().unwrap_or(WORKING_DIRECTORY_DEFAULT);
+	let resolved_working_directory = target_args.substitute(working_directory_template, &pre_env)?;
+	let effective_working_dir = resolve_working_directory_path(&resolved_working_directory, target_runfile_dir);
 
 	// Handle detached targets: spawn commands in background and return immediately
 	if spec.detach.unwrap_or(false) {
@@ -675,32 +708,67 @@ fn is_ci_environment() -> bool {
 	std::env::var("CI").is_ok_and(|v| v == "true" || v == "1")
 }
 
-/// Return a cloned [`RunArgs`] with `run_context.shell` set to match the
-/// active shell AND `run_context.namespaces` populated from the merged
-/// Runfile; or `None` if `args.run_context` is already in sync (so the
-/// caller can keep the existing borrow). Keeps `{{ RUN.shell }}` / `{{ RUN.os }}`
-/// substitutions correct even when callers pass args from outside (e.g.
-/// tests that use `RunArgs::default()`), and ensures `for "in":
-/// "namespaces"` always sees the post-merge namespace list.
+/// Return a cloned [`RunArgs`] with the run-context fields synced to the
+/// active shell, the merged Runfile's namespace list, the caller cwd, and
+/// the currently-executing target's source Runfile path / parent dir; or
+/// `None` if everything is already in sync (so the caller can keep the
+/// existing borrow). Keeps `{{ RUN.* }}` substitutions correct even when
+/// callers pass args from outside (e.g. tests that use `RunArgs::default()`).
 ///
-/// The namespace list is compared by pointer (`Arc::ptr_eq`) so cheap
-/// pointer equality keeps the no-op fast-path active whenever the caller
-/// already attached the same `Arc`.
-fn ensure_run_context(args: &RunArgs, shell_kind: &runfile_shell::ShellKind, namespaces: &[String]) -> Option<RunArgs> {
+/// The namespace list is compared as a slice — when the caller already
+/// attached the same content, no allocation happens.
+fn ensure_run_context(
+	args: &RunArgs,
+	shell_kind: &runfile_shell::ShellKind,
+	namespaces: &[String],
+	caller_cwd: &Path,
+	target_file: &Path,
+	target_dir: &Path,
+) -> Option<RunArgs> {
 	let shell_name = shell_kind.name();
 	let os = crate::args::detect_current_os();
+	let cwd_str = caller_cwd.to_string_lossy();
+	let file_str = target_file.to_string_lossy();
+	let parent_str = target_dir.to_string_lossy();
+
 	let shell_in_sync = args.run_context.shell == shell_name && args.run_context.os == os;
 	let namespaces_in_sync = args.run_context.namespaces.as_slice() == namespaces;
-	if shell_in_sync && namespaces_in_sync {
+	let cwd_in_sync = args.run_context.cwd == cwd_str;
+	let file_in_sync = args.run_context.file == file_str;
+	let parent_in_sync = args.run_context.parent == parent_str;
+
+	if shell_in_sync && namespaces_in_sync && cwd_in_sync && file_in_sync && parent_in_sync {
 		None
 	} else {
 		let mut owned = args.clone();
 		owned.run_context.os = os.to_string();
 		owned.run_context.shell = shell_name.to_string();
+		if !cwd_in_sync {
+			owned.run_context.cwd = cwd_str.into_owned();
+		}
+		if !file_in_sync {
+			owned.run_context.file = file_str.into_owned();
+		}
+		if !parent_in_sync {
+			owned.run_context.parent = parent_str.into_owned();
+		}
 		if !namespaces_in_sync {
 			owned.run_context.namespaces = Arc::new(namespaces.to_vec());
 		}
 		Some(owned)
+	}
+}
+
+/// Resolve a substituted `workingDirectory` value to an absolute path.
+/// Absolute paths pass through; relative paths are joined onto the
+/// target's source Runfile directory (`base_dir`), so e.g.
+/// `"workingDirectory": "subdir"` works regardless of the caller's CWD.
+fn resolve_working_directory_path(value: &str, base_dir: &Path) -> PathBuf {
+	let p = Path::new(value);
+	if p.is_absolute() {
+		p.to_path_buf()
+	} else {
+		base_dir.join(p)
 	}
 }
 

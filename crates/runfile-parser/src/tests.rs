@@ -754,33 +754,59 @@ fn reject_alias_same_as_target() {
 // ── workingDirectory tests ──────────────────────────────────────────
 
 #[test]
-fn parse_working_directory_on_target() {
+fn parse_working_directory_substitution_on_target() {
+	// `workingDirectory` is a free-form path that supports `{{ ... }}`
+	// substitution.
 	let json = r#"{
         "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
-                "workingDirectory": "cwd"
+                "workingDirectory": "{{ RUN.cwd }}"
             }
         }
     }"#;
 	let rf = parse_runfile(json).unwrap();
-	assert_eq!(rf.targets["build"].working_directory.as_deref(), Some("cwd"));
+	assert_eq!(rf.targets["build"].working_directory.as_deref(), Some("{{ RUN.cwd }}"));
 }
 
 #[test]
-fn parse_working_directory_runfile_parent() {
+fn parse_working_directory_relative_path_on_target() {
+	// Plain relative paths are accepted; the runner resolves them against
+	// the target's source Runfile directory.
 	let json = r#"{
         "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {
             "build": {
                 "commands": ["echo"],
-                "workingDirectory": "runfileParent"
+                "workingDirectory": "subdir/build"
             }
         }
     }"#;
 	let rf = parse_runfile(json).unwrap();
-	assert_eq!(rf.targets["build"].working_directory.as_deref(), Some("runfileParent"));
+	assert_eq!(rf.targets["build"].working_directory.as_deref(), Some("subdir/build"));
+}
+
+#[test]
+fn parse_working_directory_absolute_path_on_target() {
+	// Absolute paths pass through untouched.
+	#[cfg(windows)]
+	let abs = r"C:\\Users\\dev\\project";
+	#[cfg(not(windows))]
+	let abs = "/home/dev/project";
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "targets": {{
+            "build": {{
+                "commands": ["echo"],
+                "workingDirectory": "{abs}"
+            }}
+        }}
+    }}"#
+	);
+	let rf = parse_runfile(&json).unwrap();
+	assert!(rf.targets["build"].working_directory.is_some());
 }
 
 #[test]
@@ -791,11 +817,11 @@ fn parse_working_directory_on_globals() {
             "build": { "commands": ["echo"] }
         },
         "globals": {
-            "workingDirectory": "cwd"
+            "workingDirectory": "{{ RUN.cwd }}"
         }
     }"#;
 	let rf = parse_runfile(json).unwrap();
-	assert_eq!(rf.globals.unwrap().working_directory.as_deref(), Some("cwd"));
+	assert_eq!(rf.globals.unwrap().working_directory.as_deref(), Some("{{ RUN.cwd }}"));
 }
 
 #[test]
@@ -808,20 +834,6 @@ fn parse_working_directory_absent_is_none() {
     }"#;
 	let rf = parse_runfile(json).unwrap();
 	assert!(rf.targets["build"].working_directory.is_none());
-}
-
-#[test]
-fn reject_invalid_working_directory() {
-	let json = r#"{
-        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
-        "targets": {
-            "build": {
-                "commands": ["echo"],
-                "workingDirectory": "invalid"
-            }
-        }
-    }"#;
-	assert!(parse_runfile(json).is_err());
 }
 
 // ── JSON5 parsing tests ───────────────────────────────────────────
@@ -3263,7 +3275,7 @@ fn walk_spec_aux_templates_visits_all_substitutable_fields() {
 				"envFiles": [".env.{{ RUN.os }}", ".env"],
 				"forceShell": "{{ ARGS.shell ? bash }}",
 				"addToPath": ["bin/{{ ARGS.profile }}"],
-				"workingDirectory": "{{ ARGS.dir ? runfileParent }}",
+				"workingDirectory": "{{ ARGS.dir ? RUN.parent }}",
 				"confirm": "Run with {{ ARGS.env }}?",
 				"extendStdio": [{ "fromFile": "logs/{{ RUN.os }}.log", "stream": "stdout" }]
 			}
@@ -3286,7 +3298,7 @@ fn walk_spec_aux_templates_visits_all_substitutable_fields() {
 	assert!(seen.iter().any(|s| s == ".env"));
 	assert!(seen.iter().any(|s| s == "{{ ARGS.shell ? bash }}"));
 	assert!(seen.iter().any(|s| s == "bin/{{ ARGS.profile }}"));
-	assert!(seen.iter().any(|s| s == "{{ ARGS.dir ? runfileParent }}"));
+	assert!(seen.iter().any(|s| s == "{{ ARGS.dir ? RUN.parent }}"));
 	assert!(seen.iter().any(|s| s == "Run with {{ ARGS.env }}?"));
 	assert!(seen.iter().any(|s| s == "logs/{{ RUN.os }}.log"));
 }

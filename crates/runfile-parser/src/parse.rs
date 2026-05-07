@@ -1,8 +1,5 @@
 use crate::dsl::{parse_condition, DslParseError};
-use crate::schema::{
-	CommandStep, ForStep, IfStep, MatchStep, Runfile, TargetCallStep, WhenStep, WORKING_DIRECTORY_CWD,
-	WORKING_DIRECTORY_RUNFILE_PARENT,
-};
+use crate::schema::{CommandStep, ForStep, IfStep, MatchStep, Runfile, TargetCallStep, WhenStep};
 use std::path::Path;
 use thiserror::Error;
 
@@ -72,38 +69,11 @@ pub enum ParseError {
 	#[error("`when` block in {0} has an empty commands list")]
 	EmptyWhenCommands(String),
 
-	#[error(
-		"Invalid `workingDirectory` value \"{1}\" in {0} — must be \"runfileParent\" or \"cwd\" (or a `{{{{ ... }}}}` substitution)."
-	)]
-	InvalidWorkingDirectoryLiteral(String, String),
-
 	#[error("`match` block in {0} has an empty match expression")]
 	EmptyMatchExpression(String),
 
 	#[error("`match` block in {0} has no cases and no default — at least one of `cases` (with at least one entry) or `default` is required")]
 	EmptyMatchCases(String),
-}
-
-/// Whether a string carries a `{{ ... }}` substitution that defers its actual
-/// value to runtime. Used to skip parse-time literal validation for fields
-/// like `forceShell` / `workingDirectory` that accept substitution.
-fn is_substitution_template(s: &str) -> bool {
-	s.contains("{{")
-}
-
-/// Validate a `workingDirectory` field. Substitution templates are accepted
-/// (they're checked at runtime); pure literals must be one of the canonical
-/// values.
-fn validate_working_directory(value: &Option<String>, context: &str) -> Result<(), ParseError> {
-	if let Some(s) = value {
-		if !is_substitution_template(s) && s != WORKING_DIRECTORY_RUNFILE_PARENT && s != WORKING_DIRECTORY_CWD {
-			return Err(ParseError::InvalidWorkingDirectoryLiteral(
-				context.to_string(),
-				s.clone(),
-			));
-		}
-	}
-	Ok(())
 }
 
 /// Maximum Runfile size in bytes (10 MiB). Prevents denial-of-service via
@@ -113,10 +83,10 @@ pub const MAX_RUNFILE_SIZE: u64 = 10 * 1024 * 1024;
 /// Parse a Runfile from a JSON string.
 ///
 /// Validates structural constraints (non-empty schema, at least one target,
-/// non-empty command lists, env keys, aliases, `for`-step iterator XOR,
-/// literal `workingDirectory` values). `@target` references inside `commands`
-/// are NOT validated here — they are checked at runtime, because included
-/// files may define targets not yet available.
+/// non-empty command lists, env keys, aliases, `for`-step iterator XOR).
+/// `@target` references inside `commands` are NOT validated here — they are
+/// checked at runtime, because included files may define targets not yet
+/// available.
 ///
 /// As part of validation, every `if` condition is parsed eagerly into a
 /// [`crate::DslExpr`] AST and cached on the [`crate::IfStep`] so that
@@ -442,9 +412,6 @@ fn validate_runfile(runfile: &mut Runfile, require_targets: bool) -> Result<(), 
 			return Err(ParseError::DetachRequiresParallel(name.clone()));
 		}
 
-		// Validate workingDirectory literal values (templates pass through).
-		validate_working_directory(&spec.working_directory, &format!("target \"{name}\""))?;
-
 		// Validate env key names to prevent shell injection
 		validate_env_keys(&spec.env, &format!("target \"{name}\""))?;
 	}
@@ -482,8 +449,6 @@ fn validate_runfile(runfile: &mut Runfile, require_targets: bool) -> Result<(), 
 
 	// Validate globals
 	if let Some(globals) = runfile.globals.as_mut() {
-		validate_working_directory(&globals.working_directory, "(globals)")?;
-
 		// Validate global env key names
 		validate_env_keys(&globals.env, "(globals)")?;
 	}

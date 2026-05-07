@@ -93,34 +93,34 @@ Other runners assume one platform and one shell. Runfile assumes **none**.
 
 Sorted from where Runfile is most differentiated to where it lags behind.
 
-| Feature                                               | Runfile | Make | Just | Taskfile |
-|-------------------------------------------------------|:-------:|:----:|:----:|:--------:|
-| Encrypted env vars, built-in (AES-256-GCM)            |    ✅    |  ❌   |  ❌   |    ❌     |
-| MCP server (AI agent integration)                     |    ✅    |  ❌   |  ❌   |    ❌     |
-| `when:` blocks for success/failure/always cleanup     |    ✅    |  ❌   |  ❌   |    ❌     |
-| Inline OS / shell / debug branching via `{{ RUN.* }}` |    ✅    |  ❌   |  ❌   |    ❌     |
-| Detached background execution                         |    ✅    |  ❌   |  ❌   |    ❌     |
-| IDE task generation (VS Code / Zed / JetBrains)       |    ✅    |  ❌   |  ❌   |    ❌     |
-| Migrate from `package.json` / `Makefile`              |    ✅    |  ❌   |  ❌   |    ❌     |
-| Force-kill process tree on SIGINT (GUI apps)          |    ✅    |  ❌   |  ❌   |    ❌     |
-| Stdio log tailers (`extendStdio`)                     |    ✅    |  ❌   |  ❌   |    ❌     |
-| First-class PowerShell / cmd.exe                      |    ✅    |  ❌   |  ✅   |    ❌     |
-| Fish shell support                                    |    ✅    |  ❌   |  ✅   |    ❌     |
-| Per-target shell override                             |    ✅    |  ❌   |  ✅   |    ❌     |
-| Strict parsing (typos are errors)                     |    ✅    |  ❌   |  ✅   |    ❌     |
-| Argument substitution with chained fallbacks          |    ✅    |  ❌   |  ✅   |    ❌     |
-| JSON Schema autocomplete in editors                   |    ✅    |  ❌   |  ❌   |    ✅     |
-| Watch mode, built-in                                  |    ✅    |  ❌   |  ❌   |    ✅     |
-| Native Windows (no WSL / msys2 needed)                |    ✅    |  ❌   |  ✅   |    ✅     |
-| Parallel execution                                    |    ✅    |  ✅   |  ❌   |    ✅     |
-| Shell completions                                     |    ✅    |  ❌   |  ✅   |    ✅     |
-| Private / internal targets (`_name`)                  |    ✅    |  ❌   |  ✅   |    ✅     |
-| Single static binary                                  |    ✅    |  ✅   |  ✅   |    ✅     |
-| Pattern rules (`%.o: %.c`)                            |    ❌    |  ✅   |  ❌   |    ❌     |
-| Output grouping / prefixing in parallel mode          |    ❌    |  ❌   |  ❌   |    ✅     |
-| Preconditions / status checks                         |    ❌    |  ❌   |  ❌   |    ✅     |
-| Incremental builds (sources / timestamps / checksums) |    ❌    |  ✅   |  ❌   |    ✅     |
-| Built-in string functions (upper, replace, trim, …)   |    ❌    |  ❌   |  ✅   |    ✅     |
+| Feature                                                             | Runfile | Make | Just | Taskfile |
+|---------------------------------------------------------------------|:-------:|:----:|:----:|:--------:|
+| Encrypted env vars, built-in (AES-256-GCM)                          |    ✅    |  ❌   |  ❌   |    ❌     |
+| MCP server (AI agent integration)                                   |    ✅    |  ❌   |  ❌   |    ❌     |
+| `when:` blocks for success/failure/always cleanup                   |    ✅    |  ❌   |  ❌   |    ❌     |
+| Inline OS / shell / cwd / paths / debug branching via `{{ RUN.* }}` |    ✅    |  ❌   |  ❌   |    ❌     |
+| Detached background execution                                       |    ✅    |  ❌   |  ❌   |    ❌     |
+| IDE task generation (VS Code / Zed / JetBrains)                     |    ✅    |  ❌   |  ❌   |    ❌     |
+| Migrate from `package.json` / `Makefile`                            |    ✅    |  ❌   |  ❌   |    ❌     |
+| Force-kill process tree on SIGINT (GUI apps)                        |    ✅    |  ❌   |  ❌   |    ❌     |
+| Stdio log tailers (`extendStdio`)                                   |    ✅    |  ❌   |  ❌   |    ❌     |
+| First-class PowerShell / cmd.exe                                    |    ✅    |  ❌   |  ✅   |    ❌     |
+| Fish shell support                                                  |    ✅    |  ❌   |  ✅   |    ❌     |
+| Per-target shell override                                           |    ✅    |  ❌   |  ✅   |    ❌     |
+| Strict parsing (typos are errors)                                   |    ✅    |  ❌   |  ✅   |    ❌     |
+| Argument substitution with chained fallbacks                        |    ✅    |  ❌   |  ✅   |    ❌     |
+| JSON Schema autocomplete in editors                                 |    ✅    |  ❌   |  ❌   |    ✅     |
+| Watch mode, built-in                                                |    ✅    |  ❌   |  ❌   |    ✅     |
+| Native Windows (no WSL / msys2 needed)                              |    ✅    |  ❌   |  ✅   |    ✅     |
+| Parallel execution                                                  |    ✅    |  ✅   |  ❌   |    ✅     |
+| Shell completions                                                   |    ✅    |  ❌   |  ✅   |    ✅     |
+| Private / internal targets (`_name`)                                |    ✅    |  ❌   |  ✅   |    ✅     |
+| Single static binary                                                |    ✅    |  ✅   |  ✅   |    ✅     |
+| Pattern rules (`%.o: %.c`)                                          |    ❌    |  ✅   |  ❌   |    ❌     |
+| Output grouping / prefixing in parallel mode                        |    ❌    |  ❌   |  ❌   |    ✅     |
+| Preconditions / status checks                                       |    ❌    |  ❌   |  ❌   |    ✅     |
+| Incremental builds (sources / timestamps / checksums)               |    ❌    |  ✅   |  ❌   |    ✅     |
+| Built-in string functions (upper, replace, trim, …)                 |    ❌    |  ❌   |  ✅   |    ✅     |
 
 ---
 
@@ -167,8 +167,9 @@ $ run :env inject -f .env.production -- ./deploy.sh       # encrypted values aut
 
 #### Powerful argument substitution
 
-Positional, named, flags, env vars, and runtime context (`{{ RUN.os }}` / `{{ RUN.shell }}`) — with chained fallbacks
-and required values. The new `{{ ... }}` syntax avoids collisions with shell `$(...)` command substitution.
+Positional, named, flags, env vars, and runtime context (`{{ RUN.os }}` / `{{ RUN.shell }}` / `{{ RUN.cwd }}` /
+`{{ RUN.file }}` / `{{ RUN.parent }}`) — with chained fallbacks and required values. The `{{ ... }}` syntax
+avoids collisions with shell `$(...)` command substitution.
 
 ```jsonc
 "PORT": "{{ ARGS.port ? ENV.PORT ? 3000 }}",
@@ -177,7 +178,9 @@ and required values. The new `{{ ... }}` syntax avoids collisions with shell `$(
 // Inline OS/shell branches:
 { "if": "{{ RUN.os }} == windows", "then": ["del /S /Q build"], "else": ["rm -rf build"] },
 // User-supplied flags branch through {{ FLAGS.x }}:
-{ "if": "{{ FLAGS.debug }} == true", "then": ["./tool --verbose"], "else": ["./tool"] }
+{ "if": "{{ FLAGS.debug }} == true", "then": ["./tool --verbose"], "else": ["./tool"] },
+// workingDirectory is a free-form path (defaults to {{ RUN.parent }}):
+"workingDirectory": "{{ ARGS.workdir ? RUN.cwd }}"
 ```
 
 Strict format: exactly one space after `{{` and before `}}`, exactly one space around `?` and `:` operators.

@@ -1,4 +1,4 @@
-use runfile_parser::{parse_runfile_from_path, RUNFILE_NAME, WORKING_DIRECTORY_CWD};
+use runfile_parser::{parse_runfile_from_path, RUNFILE_NAME};
 use std::path::PathBuf;
 use std::process;
 
@@ -157,7 +157,7 @@ pub fn cmd_convert_makefile(makefile_path: Option<PathBuf>) {
 	if !conversion.targets.is_empty() {
 		let globals = runfile.globals.get_or_insert_with(Default::default);
 		if globals.working_directory.is_none() {
-			globals.working_directory = Some(WORKING_DIRECTORY_CWD.to_string());
+			globals.working_directory = Some("{{ RUN.cwd }}".to_string());
 		}
 		write_runfile(&runfile);
 	}

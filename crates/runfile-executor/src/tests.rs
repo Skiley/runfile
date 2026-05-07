@@ -1582,7 +1582,7 @@ fn run_target_cwd_working_directory() {
         "targets": {{
             "test-cwd": {{
                 "commands": ["{create_marker}"],
-                "workingDirectory": "cwd"
+                "workingDirectory": "{{{{ RUN.cwd }}}}"
             }}
         }}
     }}"#
@@ -1591,13 +1591,16 @@ fn run_target_cwd_working_directory() {
 	let runfile: Runfile = serde_json::from_str(&json).unwrap();
 	let args = RunArgs::default();
 
+	let runfile_path = runfile_dir.path().join("Runfile.json");
 	let result = run_target_with_cwd(
 		"test-cwd",
 		&runfile,
 		&shell,
 		&args,
+		&runfile_path,
 		runfile_dir.path(),
 		caller_cwd.path(),
+		&std::collections::HashMap::new(),
 		&std::collections::HashMap::new(),
 		false,
 		false,
@@ -1631,7 +1634,7 @@ fn run_target_global_cwd_working_directory() {
         "targets": {{
             "test-cwd": {{
                 "commands": ["{create_marker}"],
-                "workingDirectory": "cwd"
+                "workingDirectory": "{{{{ RUN.cwd }}}}"
             }}
         }}
     }}"#
@@ -1640,13 +1643,16 @@ fn run_target_global_cwd_working_directory() {
 	let runfile: Runfile = serde_json::from_str(&json).unwrap();
 	let args = RunArgs::default();
 
+	let runfile_path = runfile_dir.path().join("Runfile.json");
 	let result = run_target_with_cwd(
 		"test-cwd",
 		&runfile,
 		&shell,
 		&args,
+		&runfile_path,
 		runfile_dir.path(),
 		caller_cwd.path(),
+		&std::collections::HashMap::new(),
 		&std::collections::HashMap::new(),
 		false,
 		false,
@@ -1669,8 +1675,8 @@ fn run_target_working_directory_target_overrides_global() {
 	let runfile_dir = TempDir::new().unwrap();
 	let caller_cwd = TempDir::new().unwrap();
 
-	// Global says cwd, but target says runfileParent.
-	// Marker goes into runfile_dir, proving the target override won.
+	// Target overrides with `{{ RUN.parent }}` — marker lands in runfile_dir,
+	// proving the target override took effect.
 	let marker = runfile_dir.path().join("override_marker");
 	let marker_escaped = json_escape_path(&marker);
 	let create_marker = if shell.kind == ShellKind::Cmd {
@@ -1685,7 +1691,7 @@ fn run_target_working_directory_target_overrides_global() {
         "targets": {{
             "test-override": {{
                 "commands": ["{create_marker}"],
-                "workingDirectory": "runfileParent"
+                "workingDirectory": "{{{{ RUN.parent }}}}"
             }}
         }}
     }}"#
@@ -1694,13 +1700,16 @@ fn run_target_working_directory_target_overrides_global() {
 	let runfile: Runfile = serde_json::from_str(&json).unwrap();
 	let args = RunArgs::default();
 
+	let runfile_path = runfile_dir.path().join("Runfile.json");
 	let result = run_target_with_cwd(
 		"test-override",
 		&runfile,
 		&shell,
 		&args,
+		&runfile_path,
 		runfile_dir.path(),
 		caller_cwd.path(),
+		&std::collections::HashMap::new(),
 		&std::collections::HashMap::new(),
 		false,
 		false,
@@ -1713,8 +1722,8 @@ fn run_target_working_directory_target_overrides_global() {
 
 #[test]
 fn working_directory_accepts_substitution() {
-	// `workingDirectory` may be a `{{ ... }}` template that resolves to one of
-	// the canonical values at runtime.
+	// `workingDirectory` is a free-form path that supports `{{ ... }}`
+	// substitution; chain fallbacks should resolve at runtime.
 	use crate::runner::run_target;
 	use runfile_parser::parse_runfile;
 
@@ -1728,14 +1737,14 @@ fn working_directory_accepts_substitution() {
 		format!("touch \\\"{marker_escaped}\\\"")
 	};
 
-	// `{{ ARGS.dir ? cwd }}` → resolves to the literal "cwd" at runtime.
+	// `{{ ARGS.dir ? RUN.cwd }}` → falls back to RUN.cwd when --dir is missing.
 	let json = format!(
 		r#"{{
         "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
         "targets": {{
             "t": {{
                 "commands": ["{touch}"],
-                "workingDirectory": "{{{{ ARGS.dir ? cwd }}}}"
+                "workingDirectory": "{{{{ ARGS.dir ? RUN.cwd }}}}"
             }}
         }}
     }}"#
@@ -1747,24 +1756,61 @@ fn working_directory_accepts_substitution() {
 }
 
 #[test]
-fn working_directory_invalid_substitution_errors_at_runtime() {
-	use crate::runner::{run_target, RunError};
-	use runfile_parser::parse_runfile;
+fn working_directory_relative_path_resolves_against_runfile_parent() {
+	// A bare relative `workingDirectory` path resolves against the target's
+	// source Runfile directory, not the caller's CWD.
+	use crate::runner::run_target_with_cwd;
+	use runfile_parser::Runfile;
 
 	let shell = get_test_shell();
-	let dir = TempDir::new().unwrap();
-	let json = r#"{
+	let runfile_dir = TempDir::new().unwrap();
+	let caller_cwd = TempDir::new().unwrap();
+	let nested = runfile_dir.path().join("nested");
+	std::fs::create_dir(&nested).unwrap();
+
+	let marker = nested.join("relative_marker");
+	let marker_escaped = json_escape_path(&marker);
+	let create_marker = if shell.kind == ShellKind::Cmd {
+		format!("echo done > \\\"{marker_escaped}\\\"")
+	} else {
+		format!("touch \\\"{marker_escaped}\\\"")
+	};
+
+	let json = format!(
+		r#"{{
         "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
-        "targets": {
-            "t": {
-                "commands": ["echo hi"],
-                "workingDirectory": "{{ ARGS.dir ? bogus }}"
-            }
-        }
-    }"#;
-	let runfile = parse_runfile(json).unwrap();
-	let err = run_target("t", &runfile, &shell, &RunArgs::default(), dir.path()).unwrap_err();
-	assert!(matches!(err, RunError::InvalidWorkingDirectory(_, _)), "got: {err}");
+        "targets": {{
+            "t": {{
+                "commands": ["{create_marker}"],
+                "workingDirectory": "nested"
+            }}
+        }}
+    }}"#
+	);
+	let runfile: Runfile = serde_json::from_str(&json).unwrap();
+	let args = RunArgs::default();
+
+	let runfile_path = runfile_dir.path().join("Runfile.json");
+	let result = run_target_with_cwd(
+		"t",
+		&runfile,
+		&shell,
+		&args,
+		&runfile_path,
+		runfile_dir.path(),
+		caller_cwd.path(),
+		&std::collections::HashMap::new(),
+		&std::collections::HashMap::new(),
+		false,
+		false,
+		None,
+	)
+	.unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		marker.exists(),
+		"Relative workingDirectory should resolve against runfile parent, not caller CWD"
+	);
 }
 
 #[test]
@@ -3522,7 +3568,7 @@ fn extract_with_working_directory_cwd() {
         "targets": {
             "test": {
                 "commands": ["echo test"],
-                "workingDirectory": "cwd"
+                "workingDirectory": "{{ RUN.cwd }}"
             }
         }
     }"#;
@@ -3532,12 +3578,15 @@ fn extract_with_working_directory_cwd() {
 	let runfile_dir = TempDir::new().unwrap();
 	let caller_cwd = TempDir::new().unwrap();
 
+	let runfile_path = runfile_dir.path().join("Runfile.json");
 	let commands = extract_target_with_cwd(
 		"test",
 		&runfile,
 		&args,
+		&runfile_path,
 		runfile_dir.path(),
 		caller_cwd.path(),
+		&std::collections::HashMap::new(),
 		&std::collections::HashMap::new(),
 		None,
 	)
@@ -3585,13 +3634,17 @@ fn extract_decrypts_envfile_when_private_key_provided() {
 	let runfile: Runfile = serde_json::from_str(json).unwrap();
 	let args = RunArgs::default();
 
+	let runfile_path = dir.path().join("Runfile.json");
+
 	// Without keys: should hit the same error path the real run would.
 	let err = extract_target_with_cwd(
 		"deploy",
 		&runfile,
 		&args,
+		&runfile_path,
 		dir.path(),
 		dir.path(),
+		&std::collections::HashMap::new(),
 		&std::collections::HashMap::new(),
 		None,
 	)
@@ -3608,8 +3661,10 @@ fn extract_decrypts_envfile_when_private_key_provided() {
 		"deploy",
 		&runfile,
 		&args,
+		&runfile_path,
 		dir.path(),
 		dir.path(),
+		&std::collections::HashMap::new(),
 		&std::collections::HashMap::new(),
 		Some(&private_keys),
 	)
@@ -4771,6 +4826,7 @@ fn for_in_namespaces_iterates_runfile_namespaces() {
 		os: "linux".into(),
 		shell: shell.kind.name().to_string(),
 		namespaces: std::sync::Arc::new(vec!["project_one".into(), "project_two".into()]),
+		..Default::default()
 	});
 	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
 	assert_eq!(result.commands_run, 2);
@@ -4943,6 +4999,7 @@ fn for_in_namespaces_with_empty_list_does_nothing() {
 		os: "linux".into(),
 		shell: shell.kind.name().to_string(),
 		namespaces: std::sync::Arc::new(Vec::new()),
+		..Default::default()
 	});
 	let result = execute_command(&spec, &shell, &args, dir.path(), None, false).unwrap();
 	assert_eq!(result.commands_run, 0);

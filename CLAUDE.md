@@ -234,12 +234,15 @@ crates/
   one space around `?` and `:`. Use `\{{` / `\}}` to emit a literal `{{` / `}}` in the output.
   `scan_args_usage` mirrors this so `validate_args` recognises `--env` even when its only reference is
   nested inside a shell `$(...)`.
-- `RunContext { os, shell }`: static execution context. Resolves `{{ RUN.os }}` (`"windows"` / `"linux"` / `"mac"`)
-  and `{{ RUN.shell }}` (`"bash"` / `"zsh"` / `"sh"` / `"fish"` / `"powershell"` / `"cmd"`). Unknown `RUN.<key>` is
-  a hard error. Participates in chained fallbacks (`{{ ARGS.shell ? RUN.shell }}`). The runner calls
-  `ensure_run_context()` per target so `{{ RUN.shell }}` stays accurate even when a target-level `forceShell`
-  swaps the effective shell. `forceShell` and `workingDirectory` themselves go through substitution before
-  resolution — e.g. `"forceShell": "{{ ARGS.shell ? bash }}"` works.
+- `RunContext { os, shell, cwd, file, parent, namespaces }`: static execution context. Resolves all `{{ RUN.* }}`
+  keys: `os` (`"windows"` / `"linux"` / `"mac"`), `shell` (`"bash"` / `"zsh"` / `"sh"` / `"fish"` / `"powershell"` /
+  `"cmd"`), `cwd` (caller's current working dir, absolute path), `file` (source Runfile path of the
+  currently-executing target), `parent` (directory of `file`). Unknown `RUN.<key>` is a hard error.
+  Participates in chained fallbacks (`{{ ARGS.shell ? RUN.shell }}`). The runner calls `ensure_run_context()`
+  per target so `shell` / `file` / `parent` stay accurate when a target-level `forceShell` swaps the effective
+  shell, or when a target was defined in an included or global Runfile. `cwd` is captured once at top level and
+  doesn't change. `forceShell` and `workingDirectory` themselves go through substitution before resolution —
+  e.g. `"forceShell": "{{ ARGS.shell ? bash }}"` works.
 - `LoopScope`: stack of currently-active `for`-loop bindings (`var → value`). Pushed/popped by the executor when
   entering/leaving a `for` block. `RunArgs::substitute_with_loop()` and `substitute_redacted_with_loop()` accept a
   `&LoopScope` to resolve `{{ LOOP.<var> }}` references. The non-loop `substitute()` and `substitute_redacted()` are
@@ -369,8 +372,10 @@ crates/
   `run_target()` instead of `execute_command()` directly. No globals threading — everything is already on the
   `CommandSpec`. `RunRoot` holds a `StepCounter` initialized to `count_target_leaves(target_name, ...)`, threaded
   through every nested `_with_counter` call so step numbers stay continuous. `forceShell` and `workingDirectory`
-  are substituted (against args + parent env) before resolution; the substituted `workingDirectory` value must
-  equal `"runfileParent"` or `"cwd"`, otherwise the runner errors with `RunError::InvalidWorkingDirectory`.
+  are substituted (against args + parent env) before resolution. `workingDirectory` is a free-form path that
+  supports `{{ ... }}` substitution; default (when unset) is `{{ RUN.parent }}` (the target's source Runfile
+  directory). After substitution, relative paths are resolved against the target's source Runfile dir via
+  `resolve_working_directory_path`. There is no per-value validation — any path string is accepted.
 - Has a `windows-sys` dependency (Windows-only) for console ANSI support
 
 ### runfile-cli
@@ -475,15 +480,22 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   presence. Answers are cached per (kind, key) so the same value is asked at most once per run, even across
   `@target` invocations (the `Arc<dyn StdinPrompter>` is propagated through `RunnerDependencyResolver`). Works with
   `--dry-run` too (the dry-run path also goes through `RunArgs::substitute`).
-- Runtime context substitutions: `{{ RUN.os }}` / `{{ RUN.shell }}` expose the OS and the resolved shell so users
-  can write inline `if` conditions for cross-platform branching (e.g. `"if": "{{ RUN.os }} == windows"`).
-  Unknown RUN keys are a hard error. RUN values are not redacted by `substitute_redacted` (they aren't
-  secrets). The runner re-derives the shell value per target so a target-level `forceShell` swap is
-  reflected in `{{ RUN.shell }}`.
-- `forceShell` and `workingDirectory` accept `{{ ... }}` substitutions. The substituted `workingDirectory` value must
-  resolve to `"runfileParent"` or `"cwd"` (or be omitted), otherwise the runner errors with
-  `RunError::InvalidWorkingDirectory`. Parse-time validation rejects literal non-canonical values; templates
-  (containing `{{ ` }} defer validation to runtime.
+- Runtime context substitutions: `{{ RUN.os }}` / `{{ RUN.shell }}` / `{{ RUN.cwd }}` / `{{ RUN.file }}` /
+  `{{ RUN.parent }}` expose runtime info so users can write inline `if` conditions for cross-platform branching
+  (e.g. `"if": "{{ RUN.os }} == windows"`) or reference paths in env values, `workingDirectory`, etc. Keys:
+  - `RUN.os` — `"windows"` / `"linux"` / `"mac"`
+  - `RUN.shell` — `"bash"` / `"zsh"` / `"sh"` / `"fish"` / `"powershell"` / `"cmd"`
+  - `RUN.cwd` — caller's current working directory (absolute path; fixed for the whole run)
+  - `RUN.file` — path to the source Runfile of the *currently-executing target*
+  - `RUN.parent` — directory of the currently-executing target's source Runfile
+  Unknown RUN keys are a hard error. RUN values are not redacted by `substitute_redacted` (they aren't secrets).
+  `RUN.shell`/`RUN.file`/`RUN.parent` are refreshed per-target by the runner's `ensure_run_context`, so a target
+  defined in an included file — or a target whose `forceShell` swap changes the active shell — sees values that
+  match its own context. `RUN.cwd` is the caller cwd captured once at the top-level CLI invocation.
+- `forceShell` and `workingDirectory` accept `{{ ... }}` substitutions. `workingDirectory` is a free-form path
+  (absolute or relative) with no per-value validation — anything that resolves at runtime is accepted. Default
+  (when unset) is `{{ RUN.parent }}` (target's source Runfile dir). Relative paths are resolved against the
+  target's source Runfile directory by `resolve_working_directory_path`.
 - Control flow (`if` / `for` / `match` blocks) is evaluated by Runfile itself, not by the shell — same semantics
   on every platform. Conditions use a tiny boolean DSL parsed at Runfile load time (errors fail fast). Truthiness
   rule: only
@@ -520,8 +532,11 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   rewrite happens before merging. Nesting composes innermost-first (`outer:inner:build`). Same-file-twice with
   different namespaces is allowed (independent copies). Empty/absent namespace = legacy behavior. Internal targets
   preserve their `_`-prefix internal status under namespacing (`is_internal_target_name` checks the last `:`-segment).
-  Per-target source-dir tracking (`source_dirs` map keyed by post-rewrite name) ensures `runfileParent` and relative
-  `envFiles` paths resolve relative to the file that *defined* the target, not the merged root.
+  Per-target source-dir tracking (`source_dirs` map keyed by post-rewrite name, plus `target_sources` for the
+  full file path) ensures `{{ RUN.parent }}` / `{{ RUN.file }}` and relative `envFiles` paths resolve relative
+  to the file that *defined* the target, not the merged root. The runner / extract pipelines accept a
+  `source_files: HashMap<String, PathBuf>` alongside `source_dirs` for this — the CLI builds it from
+  `MergeResult::source_files()`.
 - `WhenStep` (`{ when, commands, [ignoreErrors] }`): the wrapper form for guarded blocks. `IfStep` and `ForStep` also
   carry an optional top-level `when` field. Default is `WhenCondition::Success`. The walker's [`WalkState`] tracks a
   `failed: bool` flag — flipped when any `when: success` step exits non-zero (and isn't `ignoreErrors`'d). `failure` /

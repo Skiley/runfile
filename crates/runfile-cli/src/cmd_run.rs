@@ -12,16 +12,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::agent_detect;
-use crate::runfile_helpers::{local_dir_from_merge, resolve_and_merge};
+use crate::runfile_helpers::{local_dir_from_merge, local_file_from_merge, resolve_and_merge};
 use crate::shell::{resolve_cli_shell_override, resolve_shell_for_runfile};
 
 /// Common resolved state shared across cmd_run, cmd_dry_run, cmd_watch.
 struct ResolvedTarget {
 	resolved_name: String,
 	runfile: Runfile,
+	runfile_path: PathBuf,
 	runfile_dir: PathBuf,
 	caller_cwd: PathBuf,
 	source_dirs: HashMap<String, PathBuf>,
+	source_files: HashMap<String, PathBuf>,
 	settings: Settings,
 	shell: ResolvedShell,
 	args: RunArgs,
@@ -37,8 +39,10 @@ fn resolve_target_setup(
 ) -> ResolvedTarget {
 	let merge_result = resolve_and_merge(file);
 	let runfile_dir = local_dir_from_merge(&merge_result);
+	let runfile_path = local_file_from_merge(&merge_result);
 	check_conflict(target_name, &merge_result);
 
+	let source_files = merge_result.source_files();
 	let runfile = merge_result.runfile;
 	let source_dirs = merge_result.source_dirs;
 
@@ -79,9 +83,11 @@ fn resolve_target_setup(
 	ResolvedTarget {
 		resolved_name,
 		runfile,
+		runfile_path,
 		runfile_dir,
 		caller_cwd,
 		source_dirs,
+		source_files,
 		settings,
 		shell,
 		args,
@@ -270,9 +276,11 @@ pub fn cmd_run(
 		&rt.runfile,
 		&rt.shell,
 		&rt.args,
+		&rt.runfile_path,
 		&rt.runfile_dir,
 		&rt.caller_cwd,
 		&rt.source_dirs,
+		&rt.source_files,
 		timings,
 		yes,
 		pk_slice,
@@ -324,9 +332,11 @@ pub fn cmd_dry_run(
 		&rt.resolved_name,
 		&rt.runfile,
 		&rt.args,
+		&rt.runfile_path,
 		&rt.runfile_dir,
 		&rt.caller_cwd,
 		&rt.source_dirs,
+		&rt.source_files,
 		pk_slice,
 	) {
 		Ok(commands) => {
@@ -419,9 +429,11 @@ pub fn cmd_watch(
 		&rt.runfile,
 		&rt.shell,
 		&rt.args,
+		&rt.runfile_path,
 		&rt.runfile_dir,
 		&rt.caller_cwd,
 		&rt.source_dirs,
+		&rt.source_files,
 		timings,
 		yes,
 		pk_slice,
@@ -509,9 +521,11 @@ pub fn cmd_watch(
 			&rt.runfile,
 			&rt.shell,
 			&rt.args,
+			&rt.runfile_path,
 			&rt.runfile_dir,
 			&rt.caller_cwd,
 			&rt.source_dirs,
+			&rt.source_files,
 			timings,
 			yes,
 			pk_slice,

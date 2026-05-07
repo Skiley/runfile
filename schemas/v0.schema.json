@@ -482,7 +482,7 @@
 		},
 		"WorkingDirectory": {
 			"type": "string",
-			"description": "Working directory for command execution. \"runfileParent\" (default) uses the Runfile.json directory; \"cwd\" uses the caller's current working directory. Accepts {{ ... }} substitution that resolves to one of those values at runtime."
+			"description": "Working directory for command execution — a free-form path (absolute or relative) that supports {{ ... }} substitution. Defaults to {{ RUN.parent }} (the source Runfile's directory). Useful builtins: {{ RUN.parent }} (the target's source Runfile directory), {{ RUN.cwd }} (the caller's current working directory), {{ RUN.file }} (the source Runfile path itself). Relative paths resolve against the target's source Runfile directory."
 		},
 		"ExtendStdio": {
 			"type": "object",

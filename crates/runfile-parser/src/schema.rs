@@ -911,9 +911,10 @@ pub struct CommandSpec {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub parallel: Option<bool>,
 
-	/// Working directory mode: `"runfileParent"` (default) or `"cwd"`.
-	/// Stored as a free-form `String` to support `{{ ... }}` substitution; the
-	/// runner validates the substituted value at execute time.
+	/// Working directory for command execution — a free-form path that supports
+	/// `{{ ... }}` substitution. Defaults to `{{ RUN.parent }}` (the source
+	/// Runfile's directory) when unset. Relative paths are resolved against
+	/// the target's source Runfile directory.
 	#[serde(default, rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
 	pub working_directory: Option<String>,
 
@@ -1065,12 +1066,15 @@ pub struct ExtendStdio {
 	pub stream: StdioStream,
 }
 
-/// Canonical `workingDirectory` values. The schema field itself is a free-form
-/// `String` so it can carry `{{ ... }}` substitutions (e.g.
-/// `"workingDirectory": "{{ ARGS.cwd ? runfileParent }}"`); runtime validation in
-/// `runner.rs` checks the substituted value matches one of these constants.
-pub const WORKING_DIRECTORY_RUNFILE_PARENT: &str = "runfileParent";
-pub const WORKING_DIRECTORY_CWD: &str = "cwd";
+/// Default `workingDirectory` value applied when a target (and globals) does
+/// not specify one. Resolves to the directory of the currently-executing
+/// target's source Runfile.
+///
+/// `workingDirectory` itself is a free-form path string that supports
+/// `{{ ... }}` substitution (typically via `{{ RUN.parent }}` /
+/// `{{ RUN.cwd }}` / `{{ RUN.file }}`). After substitution, relative paths
+/// are resolved against `RUN.parent` (the target's source dir).
+pub const WORKING_DIRECTORY_DEFAULT: &str = "{{ RUN.parent }}";
 
 /// An environment variable value — can be a string or a number.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1126,9 +1130,10 @@ pub struct Globals {
 	#[serde(default, rename = "ignoreErrors", skip_serializing_if = "Option::is_none")]
 	pub ignore_errors: Option<bool>,
 
-	/// Working directory mode: `"runfileParent"` (default) or `"cwd"`.
-	/// Stored as a free-form `String` to support `{{ ... }}` substitution; the
-	/// runner validates the substituted value at execute time.
+	/// Working directory for command execution — a free-form path that supports
+	/// `{{ ... }}` substitution. Defaults to `{{ RUN.parent }}` (the source
+	/// Runfile's directory) when unset. Relative paths are resolved against
+	/// the target's source Runfile directory.
 	#[serde(default, rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
 	pub working_directory: Option<String>,
 

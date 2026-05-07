@@ -2,7 +2,7 @@ use crate::args::{check_env_case_duplicates, validate_args, LoopScope, RunArgs, 
 use crate::control_flow::{evaluate_if_condition, resolve_match_branch, ControlFlowError};
 use crate::env::{build_env_with_base, EnvFileError};
 use runfile_parser::{
-	walk_spec_aux_templates, walk_step_templates, CommandStep, ForStep, Runfile, WhenStep, WORKING_DIRECTORY_CWD,
+	walk_spec_aux_templates, walk_step_templates, CommandStep, ForStep, Runfile, WhenStep, WORKING_DIRECTORY_DEFAULT,
 };
 use runfile_shell::ShellKind;
 use std::collections::{HashMap, HashSet};
@@ -45,19 +45,24 @@ pub fn extract_target(
 	args: &RunArgs,
 	working_dir: &Path,
 ) -> Result<Vec<ExtractedCommand>, ExtractError> {
+	let synthetic_path = working_dir.join(runfile_parser::RUNFILE_NAME);
 	extract_target_with_cwd(
 		target_name,
 		runfile,
 		args,
+		&synthetic_path,
 		working_dir,
 		working_dir,
+		&HashMap::new(),
 		&HashMap::new(),
 		None,
 	)
 }
 
 /// Extract all commands for a target with separate runfile dir and caller CWD.
-/// `source_dirs` maps target names to their source Runfile's parent directory.
+/// `source_dirs` maps target names to their source Runfile's parent directory;
+/// `source_files` maps target names to the source Runfile *path* (used to
+/// populate `{{ RUN.file }}` per-target during substitution).
 ///
 /// `@target` invocations are recursively expanded — the dep's resolved leaf
 /// shell commands appear inline at the call site (with the dep's own env
@@ -67,38 +72,54 @@ pub fn extract_target(
 /// nothing. Cycles are detected via per-call-stack tracking; calling the
 /// same target twice from sibling sites expands twice (matching runtime
 /// no-dedup semantics).
+#[allow(clippy::too_many_arguments)]
 pub fn extract_target_with_cwd<'a>(
 	target_name: &str,
 	runfile: &'a Runfile,
 	args: &RunArgs,
+	runfile_path: &'a Path,
 	runfile_dir: &'a Path,
 	caller_cwd: &'a Path,
 	source_dirs: &'a HashMap<String, PathBuf>,
+	source_files: &'a HashMap<String, PathBuf>,
 	available_private_keys: Option<&'a [String]>,
 ) -> Result<Vec<ExtractedCommand>, ExtractError> {
 	let all_commands = collect_all_extract_commands(target_name, runfile)?;
 	validate_args(args, &all_commands)?;
 
-	// Sync `run_context.namespaces` from the merged Runfile if the caller
-	// didn't already attach the same list. The runner does this via its own
-	// `ensure_run_context` before dispatch; we mirror it here so `for in:
-	// "namespaces"` resolves identically in dry-run and real execution. Only
-	// allocate when out of sync.
+	// Sync `run_context.namespaces` (and the static cwd/file/parent baselines)
+	// from the merged Runfile if the caller didn't already attach matching
+	// values. The runner does this via its own `ensure_run_context` before
+	// dispatch; we mirror it here so `for in: "namespaces"` and `{{ RUN.* }}`
+	// resolve identically in dry-run and real execution. Only allocate when
+	// out of sync. Per-target `RUN.file`/`RUN.parent` overrides happen later
+	// inside `extract_recursive_inner`.
+	let cwd_str = caller_cwd.to_string_lossy();
+	let file_str = runfile_path.to_string_lossy();
+	let parent_str = runfile_dir.to_string_lossy();
+	let needs_clone = args.run_context.namespaces.as_slice() != runfile.namespaces.as_slice()
+		|| args.run_context.cwd != cwd_str
+		|| args.run_context.file != file_str
+		|| args.run_context.parent != parent_str;
 	let synced_args;
-	let args = if args.run_context.namespaces.as_slice() == runfile.namespaces.as_slice() {
-		args
-	} else {
+	let args = if needs_clone {
 		let mut owned = args.clone();
 		owned.run_context.namespaces = Arc::new(runfile.namespaces.clone());
+		owned.run_context.cwd = cwd_str.into_owned();
+		owned.run_context.file = file_str.into_owned();
+		owned.run_context.parent = parent_str.into_owned();
 		synced_args = owned;
 		&synced_args
+	} else {
+		args
 	};
 
 	let mut ctx = ExtractContext {
 		runfile,
+		runfile_path,
 		runfile_dir,
-		caller_cwd,
 		source_dirs,
+		source_files,
 		available_private_keys,
 		in_progress: HashSet::new(),
 	};
@@ -107,9 +128,10 @@ pub fn extract_target_with_cwd<'a>(
 
 struct ExtractContext<'a> {
 	runfile: &'a Runfile,
+	runfile_path: &'a Path,
 	runfile_dir: &'a Path,
-	caller_cwd: &'a Path,
 	source_dirs: &'a HashMap<String, PathBuf>,
+	source_files: &'a HashMap<String, PathBuf>,
 	available_private_keys: Option<&'a [String]>,
 	in_progress: HashSet<String>,
 }
@@ -120,6 +142,13 @@ impl ExtractContext<'_> {
 			.get(target_name)
 			.map(|p| p.as_path())
 			.unwrap_or(self.runfile_dir)
+	}
+
+	fn target_file(&self, target_name: &str) -> &Path {
+		self.source_files
+			.get(target_name)
+			.map(|p| p.as_path())
+			.unwrap_or(self.runfile_path)
 	}
 }
 
@@ -165,14 +194,35 @@ fn extract_recursive_inner(
 		.ok_or_else(|| ExtractError::UnknownTarget(target_name.to_string()))?;
 
 	let target_runfile_dir = ctx.target_dir(target_name);
-	// Extract is a static-analysis path; we compare the *unsubstituted* string
-	// to detect the cwd mode. Fully resolving substitutions would require
-	// runtime state we don't have here. Anything that doesn't textually equal
-	// "cwd" falls back to the runfile parent.
-	let effective_working_dir = match spec.working_directory.as_deref() {
-		Some(s) if s == WORKING_DIRECTORY_CWD => ctx.caller_cwd,
-		_ => target_runfile_dir,
+	let target_runfile_file = ctx.target_file(target_name);
+
+	// Refresh `RUN.file` / `RUN.parent` to reflect *this* target's source
+	// Runfile. `RUN.cwd` was already set by the top-level `extract_target_with_cwd`
+	// and stays constant. We allocate only when at least one field changed
+	// (e.g. when entering an included target whose source differs).
+	let file_str = target_runfile_file.to_string_lossy();
+	let parent_str = target_runfile_dir.to_string_lossy();
+	let needs_clone = args.run_context.file != file_str || args.run_context.parent != parent_str;
+	let synced_args;
+	let args = if needs_clone {
+		let mut owned = args.clone();
+		owned.run_context.file = file_str.into_owned();
+		owned.run_context.parent = parent_str.into_owned();
+		synced_args = owned;
+		&synced_args
+	} else {
+		args
 	};
+
+	// `workingDirectory` is a free-form path supporting `{{ ... }}` substitution;
+	// default is `{{ RUN.parent }}`. We substitute against the parent_env (env
+	// files aren't loaded yet — we need the working dir to load them) and
+	// resolve relative paths against the target's source dir.
+	let pre_env: HashMap<String, String> = parent_env.cloned().unwrap_or_default();
+	let working_directory_template = spec.working_directory.as_deref().unwrap_or(WORKING_DIRECTORY_DEFAULT);
+	let resolved_working_directory = args.substitute(working_directory_template, &pre_env)?;
+	let effective_working_dir_owned = resolve_working_directory_path(&resolved_working_directory, target_runfile_dir);
+	let effective_working_dir: &Path = effective_working_dir_owned.as_path();
 
 	let env = build_env_with_base(
 		spec,
@@ -203,6 +253,18 @@ fn extract_recursive_inner(
 	let mut loop_scope = LoopScope::new();
 	walk_extract_steps(ctx, &spec.commands, args, &env, &extra_env, &mut loop_scope, &mut out)?;
 	Ok(out)
+}
+
+/// Resolve a substituted `workingDirectory` value to an absolute path.
+/// Absolute paths pass through; relative paths are joined onto the
+/// target's source Runfile directory (`base_dir`).
+fn resolve_working_directory_path(value: &str, base_dir: &Path) -> PathBuf {
+	let p = Path::new(value);
+	if p.is_absolute() {
+		p.to_path_buf()
+	} else {
+		base_dir.join(p)
+	}
 }
 
 /// Recursive walker that produces extract output with loop-scope awareness.

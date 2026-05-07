@@ -62,6 +62,19 @@ pub struct MergeResult {
 	pub conflicts: HashMap<String, Vec<(PathBuf, SourceKind)>>,
 }
 
+impl MergeResult {
+	/// Extract the per-target source-file paths (without source kind). Used
+	/// by the runner / extract pipeline to populate `{{ RUN.file }}` per
+	/// target — equivalent info to `target_sources`, but reshaped into the
+	/// `HashMap<String, PathBuf>` shape those layers consume.
+	pub fn source_files(&self) -> HashMap<String, PathBuf> {
+		self.target_sources
+			.iter()
+			.map(|(name, (path, _))| (name.clone(), path.clone()))
+			.collect()
+	}
+}
+
 /// Merge a local Runfile with global files.
 ///
 /// - `local`: optional (parsed Runfile, file path) for the local Runfile.json

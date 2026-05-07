@@ -4,8 +4,7 @@
 		"addToPath": [
 			"target/debug"
 		],
-		"logging": true,
-		"workingDirectory": "runfileParent"
+		"logging": true
 	},
 	"targets": {
 		"build": {

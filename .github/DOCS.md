@@ -292,7 +292,7 @@ Each target is an object under `targets`:
 | `ignoreErrors`      | `boolean`                 | No       | Continue running commands even if one fails, and exit with code 0.                                                                                          |
 | `parallel`          | `boolean`                 | No       | Execute all commands in parallel instead of sequentially. All commands spawn at once; the target finishes when all exit.                                    |
 | `detach`            | `boolean`                 | No       | Spawn commands as detached background processes and exit immediately. Requires `parallel: true`.                                                            |
-| `workingDirectory`  | `string`                  | No       | `"runfileParent"` (default) or `"cwd"`. Controls whether commands run in the Runfile.json directory or the caller's current working directory.              |
+| `workingDirectory`  | `string`                  | No       | Working directory for command execution — a free-form path (absolute or relative) that supports `{{ ... }}` substitution. Defaults to `{{ RUN.parent }}` (the source Runfile directory); use `{{ RUN.cwd }}` to run in the caller's current working directory. Relative paths resolve against the target's source Runfile directory. |
 | `aliases`           | `string[]`                | No       | Alternative names for this target.                                                                                                                          |
 | `confirm`           | `string`                  | No       | Prompt message shown before executing. Requires `y/N` confirmation. Skipped in CI or with `--yes`. The string is shown verbatim — no `{{ ... }}` substitution. |
 | `forceKillOnSigInt` | `boolean`                 | No       | When true, forcefully kill the entire spawned process tree on SIGINT/CTRL+C. See [Force-kill on Ctrl+C](#force-kill-on-ctrlc).                              |
@@ -328,7 +328,7 @@ Everything in `globals` applies to all targets. Target-level settings always tak
 | `forceShell`        | `string`   | Default shell for all targets. Overridden by target-level `forceShell`.                                                                                              |
 | `logging`           | `boolean`  | Enable command logging globally. Overridden per-target.                                                                                                              |
 | `ignoreErrors`      | `boolean`  | Ignore command failures globally. Overridden per-target.                                                                                                             |
-| `workingDirectory`  | `string`   | `"runfileParent"` (default) or `"cwd"`. Sets the default working directory for all targets. Overridden per-target.                                                   |
+| `workingDirectory`  | `string`   | Default working directory for all targets — a free-form path that supports `{{ ... }}` substitution. Defaults to `{{ RUN.parent }}` (the source Runfile directory). Overridden per-target.                                                   |
 | `forceKillOnSigInt` | `boolean`  | Default for [`forceKillOnSigInt`](#force-kill-on-ctrlc). Overridden per-target.                                                                                      |
 | `onlyInDirectories` | `string[]` | Restrict this Runfile's targets to only be available when the current working directory is under one of the listed directories (relative to the Runfile's location). |
 
@@ -520,15 +520,18 @@ absent.
 
 Flags referenced by `{{ FLAGS.key }}` are consumed and will not appear in `{{ ARGS }}`.
 
-### Runtime context — `{{ RUN.os }}`, `{{ RUN.shell }}`
+### Runtime context — `{{ RUN.* }}`
 
 Reference the active execution context to write conditional commands without
-duplicating logic into multiple targets. Two runtime values are exposed as substitutions:
+duplicating logic into multiple targets. Five runtime values are exposed as substitutions:
 
-| Substitution   | Resolves to                                                                                                                               |
-|----------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| `{{ RUN.os }}`    | `"windows"`, `"linux"`, or `"mac"`.                                                                                                       |
-| `{{ RUN.shell }}` | `"bash"`, `"zsh"`, `"sh"`, `"fish"`, `"powershell"`, or `"cmd"` — the shell that will run the commands (after any `forceShell` override). |
+| Substitution    | Resolves to                                                                                                                                 |
+|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| `{{ RUN.os }}`     | `"windows"`, `"linux"`, or `"mac"`.                                                                                                         |
+| `{{ RUN.shell }}`  | `"bash"`, `"zsh"`, `"sh"`, `"fish"`, `"powershell"`, or `"cmd"` — the shell that will run the commands (after any `forceShell` override).   |
+| `{{ RUN.cwd }}`    | Caller's current working directory (absolute path). Fixed for the whole run.                                                                |
+| `{{ RUN.file }}`   | Path to the source `Runfile.json` of the currently-executing target. Refreshed per-target so a target defined in an included file shows that include's path. |
+| `{{ RUN.parent }}` | Directory of `RUN.file`. The default for `workingDirectory`.                                                                                |
 
 These plug straight into `if` conditions, `for` iterators, command bodies, and
 `env` values:
@@ -556,8 +559,9 @@ These plug straight into `if` conditions, `for` iterators, command bodies, and
 ```
 
 Unknown `{{ RUN.<key> }}` references are an error at substitution time. The valid
-keys are `os` and `shell`. `RUN.*` participates in chained fallbacks just like
-ARGS/ENV: `{{ ARGS.shell ? RUN.shell }}`.
+keys are `os`, `shell`, `cwd`, `file`, and `parent`. `RUN.*` participates in chained
+fallbacks just like ARGS/ENV: `{{ ARGS.shell ? RUN.shell }}` or
+`{{ ARGS.workdir ? RUN.parent }}`.
 
 All substitution syntax (`{{ ARGS }}`, `{{ FLAGS }}`, `{{ ENV }}`, `{{ RUN }}`) works in `env` values too, both at the target and
 global level:
@@ -599,6 +603,9 @@ $ run dev                        # PORT=3000, NODE_OPTIONS=
 | `{{ ENV.key }}`              | Environment variable. **Error** if not set.                      |
 | `{{ RUN.os }}`               | `"windows"`, `"linux"`, or `"mac"`.                              |
 | `{{ RUN.shell }}`            | `"bash"`, `"zsh"`, `"sh"`, `"fish"`, `"powershell"`, or `"cmd"`. |
+| `{{ RUN.cwd }}`              | Caller's current working directory (absolute).                   |
+| `{{ RUN.file }}`             | Source Runfile path of the currently-executing target.           |
+| `{{ RUN.parent }}`           | Directory of `RUN.file` (default for `workingDirectory`).        |
 | `{{ ARGS.a ? ENV.b ? val }}` | Chained: try ARGS.a, then ENV.b, then literal `val`.             |
 
 **Strict formatting:** every substitution requires *exactly one* space after `{{` and before `}}`, and exactly
@@ -1121,8 +1128,8 @@ export KEY=value      # export prefix is accepted
 
 **Behavior:**
 
-- File paths are relative to the working directory (Runfile.json location by default, or CWD if `workingDirectory` is
-  `"cwd"`).
+- File paths are relative to the working directory (Runfile.json location by default, or whatever
+  `workingDirectory` resolves to — e.g. `{{ RUN.cwd }}` for the caller's CWD).
 - **Missing files are silently ignored.** This allows patterns like `.env.local` that only exist on some machines.
 - **Unparseable files produce an error.**
 - `envFiles` are loaded **before** the inline `env` object, so `env` values override file values.
@@ -1708,10 +1715,11 @@ segment of the canonical name, so `api:_helper` is still treated as
 internal — hidden from `:list`, completions, and direct CLI invocation, but
 still callable via `@api:_helper` from another target's commands.
 
-**Working directory.** A namespaced target's `workingDirectory: "runfileParent"`
-resolves to the directory of the file that defined it, not the root's. Same
-for relative `envFiles` paths. This lets each package's commands run with
-their own cwd without extra plumbing.
+**Working directory.** A namespaced target's default `workingDirectory`
+(`{{ RUN.parent }}`) resolves to the directory of the file that defined it,
+not the root's. Same for relative `envFiles` paths and any explicit
+`workingDirectory: "subdir"` on a namespaced target. This lets each
+package's commands run with their own cwd without extra plumbing.
 
 ---
 
