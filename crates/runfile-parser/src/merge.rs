@@ -5,7 +5,7 @@
 //! startup when parsing — the perf cost is irrelevant.
 
 use crate::parse::parse_runfile_from_path_partial;
-use crate::schema::{CommandSpec, CommandStep, Globals, Runfile};
+use crate::schema::{CommandSpec, CommandStep, Globals, Metadata, Runfile};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -402,7 +402,29 @@ fn bake_globals_into_target(
 		spec.only_in_directories = Some(merged);
 	}
 
+	// metadata: merge globals into target — target keys win.
+	if let Some(global_meta) = globals.metadata.as_ref() {
+		spec.metadata = Some(merge_metadata(global_meta, spec.metadata.as_ref()));
+	}
+
 	spec
+}
+
+/// Merge a target's metadata over a global metadata block. Target-defined keys
+/// win over global-defined keys; missing target keys fall back to the global
+/// value. The resulting [`Metadata`] is returned even when the target had no
+/// own metadata (so global defaults reach the target).
+pub(crate) fn merge_metadata(global: &Metadata, target: Option<&Metadata>) -> Metadata {
+	let mut merged = global.clone();
+	if let Some(t) = target {
+		if t.exclude_from_generate_command.is_some() {
+			merged.exclude_from_generate_command = t.exclude_from_generate_command;
+		}
+		for (k, v) in &t.extra {
+			merged.extra.insert(k.clone(), v.clone());
+		}
+	}
+	merged
 }
 
 /// Resolve includes from a parsed Runfile, merging included targets into the merge state.

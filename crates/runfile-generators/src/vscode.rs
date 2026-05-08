@@ -42,8 +42,17 @@ pub struct VsCodeMergeResult {
 }
 
 /// Generate VS Code tasks for all targets in a Runfile.
+///
+/// Targets are skipped when their (possibly-globals-merged) metadata sets
+/// `excludeFromGenerateCommand: true`, alongside the existing rule that
+/// hides internal `_`-prefixed targets.
 pub fn generate_vscode_tasks(runfile: &Runfile) -> Vec<VsCodeTask> {
-	let mut target_names: Vec<&String> = runfile.targets.keys().filter(|n| !is_internal_target_name(n)).collect();
+	let mut target_names: Vec<&String> = runfile
+		.targets
+		.iter()
+		.filter(|(n, spec)| !is_internal_target_name(n) && !spec.is_excluded_from_generate())
+		.map(|(n, _)| n)
+		.collect();
 	target_names.sort();
 
 	target_names

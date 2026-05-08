@@ -302,6 +302,7 @@ fn roundtrip_serialization() {
 			working_directory: None,
 			force_kill_on_sig_int: None,
 			only_in_directories: None,
+			metadata: None,
 		}),
 		namespaces: Vec::new(),
 	};
@@ -3719,4 +3720,135 @@ fn match_walks_templates_inside_cases_and_default() {
 	assert!(seen.iter().any(|s| s == "{{ ARGS.tier }}"), "saw: {seen:?}");
 	assert!(seen.iter().any(|s| s == "echo {{ ARGS.foo }}"), "saw: {seen:?}");
 	assert!(seen.iter().any(|s| s == "echo {{ ARGS.bar }}"), "saw: {seen:?}");
+}
+
+// ── Metadata field tests ──────────────────────────────────────────
+
+#[test]
+fn parse_target_with_metadata() {
+	let json = r#"{
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+		"targets": {
+			"build": {
+				"commands": ["cargo build"],
+				"metadata": { "excludeFromGenerateCommand": true }
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	let spec = &rf.targets["build"];
+	let meta = spec.metadata.as_ref().expect("metadata present");
+	assert_eq!(meta.exclude_from_generate_command, Some(true));
+	assert!(spec.is_excluded_from_generate());
+}
+
+#[test]
+fn parse_globals_with_metadata() {
+	let json = r#"{
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+		"targets": { "x": { "commands": ["echo"] } },
+		"globals": { "metadata": { "excludeFromGenerateCommand": false } }
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	let globals = rf.globals.as_ref().unwrap();
+	let meta = globals.metadata.as_ref().unwrap();
+	assert_eq!(meta.exclude_from_generate_command, Some(false));
+}
+
+#[test]
+fn metadata_preserves_unknown_keys() {
+	let json = r#"{
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+		"targets": {
+			"build": {
+				"commands": ["cargo build"],
+				"metadata": { "owner": "team-platform", "tags": ["ci", "fast"] }
+			}
+		}
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	let meta = rf.targets["build"].metadata.as_ref().unwrap();
+	assert_eq!(meta.exclude_from_generate_command, None);
+	assert_eq!(meta.extra.get("owner"), Some(&serde_json::json!("team-platform")));
+	assert_eq!(meta.extra.get("tags"), Some(&serde_json::json!(["ci", "fast"])));
+}
+
+#[test]
+fn target_default_not_excluded_from_generate() {
+	let json = r#"{
+		"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+		"targets": { "build": { "commands": ["cargo build"] } }
+	}"#;
+	let rf = parse_runfile(json).unwrap();
+	assert!(!rf.targets["build"].is_excluded_from_generate());
+}
+
+#[test]
+fn merge_metadata_globals_into_target_target_wins() {
+	// Globals say excludeFromGenerateCommand=true; target overrides to false.
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().join(RUNFILE_NAME);
+	std::fs::write(
+		&path,
+		r#"{
+			"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+			"globals": {
+				"metadata": { "excludeFromGenerateCommand": true, "owner": "team-A" }
+			},
+			"targets": {
+				"build": {
+					"commands": ["cargo build"],
+					"metadata": { "excludeFromGenerateCommand": false, "owner": "team-B" }
+				},
+				"test": {
+					"commands": ["cargo test"]
+				}
+			}
+		}"#,
+	)
+	.unwrap();
+	let runfile = parse_runfile_from_path(&path).unwrap();
+	let result = merge_runfiles(Some((runfile, path)), &[], dir.path()).unwrap();
+
+	let build = result.runfile.targets["build"].metadata.as_ref().unwrap();
+	assert_eq!(
+		build.exclude_from_generate_command,
+		Some(false),
+		"target wins over globals"
+	);
+	assert_eq!(build.extra.get("owner"), Some(&serde_json::json!("team-B")));
+	assert!(!result.runfile.targets["build"].is_excluded_from_generate());
+
+	let test = result.runfile.targets["test"].metadata.as_ref().unwrap();
+	assert_eq!(
+		test.exclude_from_generate_command,
+		Some(true),
+		"global value reaches target with no own metadata"
+	);
+	assert_eq!(test.extra.get("owner"), Some(&serde_json::json!("team-A")));
+	assert!(result.runfile.targets["test"].is_excluded_from_generate());
+}
+
+#[test]
+fn merge_metadata_no_globals_keeps_target_value() {
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().join(RUNFILE_NAME);
+	std::fs::write(
+		&path,
+		r#"{
+			"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+			"targets": {
+				"build": {
+					"commands": ["cargo build"],
+					"metadata": { "excludeFromGenerateCommand": true }
+				}
+			}
+		}"#,
+	)
+	.unwrap();
+	let runfile = parse_runfile_from_path(&path).unwrap();
+	let result = merge_runfiles(Some((runfile, path)), &[], dir.path()).unwrap();
+
+	let build = result.runfile.targets["build"].metadata.as_ref().unwrap();
+	assert_eq!(build.exclude_from_generate_command, Some(true));
 }

@@ -943,6 +943,14 @@ pub struct CommandSpec {
 	/// or under one of the specified paths (relative to the Runfile location).
 	#[serde(default, rename = "onlyInDirectories", skip_serializing_if = "Option::is_none")]
 	pub only_in_directories: Option<Vec<String>>,
+
+	/// Free-form metadata for this target. Merged from globals' `metadata`
+	/// at parse time, with target-level keys winning over global keys.
+	/// Currently only [`Metadata::exclude_from_generate_command`] is consumed
+	/// by built-in tooling (the editor-config generators); other keys round-trip
+	/// untouched and can be used by external tools.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub metadata: Option<Metadata>,
 }
 
 impl CommandSpec {
@@ -972,7 +980,52 @@ impl CommandSpec {
 			extend_stdio: None,
 			watch: None,
 			only_in_directories: None,
+			metadata: None,
 		}
+	}
+
+	/// Whether this target opts out of editor-config generators
+	/// (`run :generate vscode-tasks` / `zed-tasks` / `jetbrains-run-configurations`).
+	pub fn is_excluded_from_generate(&self) -> bool {
+		self.metadata
+			.as_ref()
+			.and_then(|m| m.exclude_from_generate_command)
+			.unwrap_or(false)
+	}
+}
+
+/// Free-form metadata, attached to globals or to an individual target.
+///
+/// Globals' `metadata` is merged into each target at parse time
+/// (see [`crate::merge::merge_metadata`]): for keys both define, the target
+/// value wins; otherwise the global value carries through. Unknown keys are
+/// preserved in [`Metadata::extra`] so external tooling can stash its own
+/// fields here without parser errors.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Metadata {
+	/// When true, editor-config generators (`run :generate vscode-tasks`,
+	/// `zed-tasks`, `jetbrains-run-configurations`) skip this target entirely:
+	/// no task/run-configuration is added, and existing entries with a matching
+	/// label are NOT updated. Default: false.
+	#[serde(
+		default,
+		rename = "excludeFromGenerateCommand",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub exclude_from_generate_command: Option<bool>,
+
+	/// Untyped extra fields. Round-trip through serde; used for tool-specific
+	/// metadata that Runfile itself doesn't interpret.
+	#[serde(flatten)]
+	pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl Metadata {
+	/// True when no field is set (neither known fields nor [`Self::extra`]).
+	/// Used by the merge layer to decide whether to attach a `Metadata` block
+	/// to a target at all.
+	pub fn is_empty(&self) -> bool {
+		self.exclude_from_generate_command.is_none() && self.extra.is_empty()
 	}
 }
 
@@ -1148,4 +1201,10 @@ pub struct Globals {
 	/// paths or their children (relative to the Runfile location).
 	#[serde(default, rename = "onlyInDirectories", skip_serializing_if = "Option::is_none")]
 	pub only_in_directories: Option<Vec<String>>,
+
+	/// Free-form metadata applied to every target in this Runfile. Merged into
+	/// each target's own `metadata` at parse time — target keys win over
+	/// global keys, otherwise globals carry through.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub metadata: Option<Metadata>,
 }

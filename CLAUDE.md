@@ -567,10 +567,10 @@ Top-level: `$schema` (required), `targets` (required), `globals` (optional)
 
 Target properties: `commands` (required), `description`, `aliases`, `env`, `envFiles`, `forceShell`, `addToPath`,
 `logging`, `ignoreErrors`, `parallel`, `detach`, `workingDirectory`, `confirm`, `forceKillOnSigInt`, `extendStdio`,
-`watch`, `onlyInDirectories`
+`watch`, `onlyInDirectories`, `metadata`
 
 Global properties: `addToPath`, `env`, `envFiles`, `forceShell`, `logging`, `ignoreErrors`, `forceKillOnSigInt`,
-`workingDirectory`, `onlyInDirectories`
+`workingDirectory`, `onlyInDirectories`, `metadata`
 
 Each entry of a `commands` array is a [`CommandStep`]: a raw shell command string, a target invocation
 (`"@target [args...]"` string), a `WhenStep` (`{ when, commands, [ignoreErrors] }`), an `IfStep`, a
@@ -690,6 +690,18 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   a fallback for the unresolvable value — only when there's no `default` does the substitution error propagate
   (with the case list appended). Cases are stored in a `BTreeMap` so error-message ordering is deterministic
   (alphabetical). `count_leaves` sums every case + default (worst case, like `if`'s both-branches counting).
+- `metadata` (free-form object): available on `globals` and on each target. Globals' `metadata` is merged
+  into each target's `metadata` at parse time by `bake_globals_into_target()` (the helper is `merge::merge_metadata`):
+  for each known key the target value wins; otherwise the global value carries through. Untyped extra keys are
+  preserved on the [`Metadata::extra`] flatten map (round-trips through serde, no validation, no `deny_unknown_fields`).
+  Currently the only key Runfile itself interprets is `excludeFromGenerateCommand: bool` — when true (default false),
+  `run :generate vscode-tasks` / `zed-tasks` / `jetbrains-run-configurations` skip the target entirely (no task /
+  run-configuration is created and existing labelled entries are NOT updated). The merged value is observed via
+  `CommandSpec::is_excluded_from_generate()`. The three generators
+  call this helper alongside the existing `is_internal_target_name()` filter, so internal targets and
+  metadata-excluded targets are both hidden from generators with no extra wiring. Other tooling consuming
+  `Runfile` (CLI `:list`, MCP, completions, etc.) is unaffected — `excludeFromGenerateCommand` is *only* a
+  generator-output filter.
 - Encrypted env vars use AES-256-GCM with the format `encrypted:<base64(nonce||ciphertext||tag)>`. Decryption happens
   in-memory inside `build_env()` — decrypted secrets never touch disk.
 - Each encrypted `.env` file contains a `RUNFILE_ENCRYPTION_PUBLIC_KEY` variable — a SHA-256 fingerprint of the private

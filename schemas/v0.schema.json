@@ -415,6 +415,9 @@
 					"items": {
 						"type": "string"
 					}
+				},
+				"metadata": {
+					"$ref": "#/$defs/Metadata"
 				}
 			}
 		},
@@ -477,6 +480,9 @@
 				"forceKillOnSigInt": {
 					"type": "boolean",
 					"description": "When true, forcefully kill the spawned process tree on SIGINT/CTRL+C for all targets. Can be overridden per-target."
+				},
+				"metadata": {
+					"$ref": "#/$defs/Metadata"
 				}
 			}
 		},
@@ -523,6 +529,17 @@
 					"type": "boolean"
 				}
 			]
+		},
+		"Metadata": {
+			"type": "object",
+			"description": "Free-form metadata block. Available on `globals` and on each individual target. Globals' metadata is merged into each target's metadata at parse time — target-defined keys win over globals. Currently only `excludeFromGenerateCommand` is interpreted by built-in tooling; other fields round-trip untouched and can be used by external tools.",
+			"additionalProperties": true,
+			"properties": {
+				"excludeFromGenerateCommand": {
+					"type": "boolean",
+					"description": "When true, editor-config generators (`run :generate vscode-tasks`, `zed-tasks`, `jetbrains-run-configurations`) skip this target entirely: no task / run-configuration is added, and existing entries with the matching label are not updated. Default: false."
+				}
+			}
 		}
 	}
 }
