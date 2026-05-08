@@ -69,7 +69,7 @@
 		},
 		"ci:build-npm-packages": {
 			"description": "Build the per-platform npm packages from downloaded artifacts (--version=<X.Y.Z>, no leading v)",
-			"commands": "node scripts/build-npm-packages.mjs --version {{ ARGS.version }} --artifacts dist-artifacts --out npm-dist"
+			"commands": "node scripts/build-npm-packages.mts --version {{ ARGS.version }} --artifacts dist-artifacts --out npm-dist"
 		},
 		"ci:publish-npm": {
 			"description": "Publish the @runfile/cli npm package (bundles all platform binaries)",

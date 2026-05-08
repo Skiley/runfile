@@ -14,7 +14,7 @@
 // can't find its binary.
 //
 // Usage:
-//   node scripts/build-npm-packages.mjs \
+//   node scripts/build-npm-packages.mts \
 //     --version 0.1.0 \
 //     --artifacts target/distrib \
 //     --out npm-dist
@@ -25,16 +25,23 @@
 //   etc.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync, existsSync, copyFileSync, chmodSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const SCOPE = '@runfile';
 const PUBLIC_NAME = 'cli';
 const REPO_URL = 'https://github.com/Skiley/runfile';
 
-// Platform table: npm-style key -> dist artifact info. The `key` is what the
-// runtime stub matches against `process.platform + '-' + process.arch`.
-const PLATFORMS = [
+interface Platform {
+	/** Matches `${process.platform}-${process.arch}` at runtime in the stub. */
+	readonly key: string;
+	/** Filename of the dist artifact (relative to the artifacts dir). */
+	readonly archive: string;
+	/** Filename of the binary inside the artifact (`run` on Unix, `run.exe` on Windows). */
+	readonly bin: string;
+}
+
+const PLATFORMS: readonly Platform[] = [
 	{ key: 'darwin-arm64', archive: 'runfile-cli-aarch64-apple-darwin.tar.xz', bin: 'run' },
 	{ key: 'darwin-x64', archive: 'runfile-cli-x86_64-apple-darwin.tar.xz', bin: 'run' },
 	{ key: 'linux-arm64', archive: 'runfile-cli-aarch64-unknown-linux-musl.tar.xz', bin: 'run' },
@@ -45,8 +52,18 @@ const PLATFORMS = [
 
 // --- arg parsing --------------------------------------------------------
 
-function parseArgs(argv) {
-	const args = { version: null, artifacts: null, out: null };
+interface BuildArgs {
+	readonly version: string;
+	readonly artifacts: string;
+	readonly out: string;
+}
+
+function parseArgs(argv: readonly string[]): BuildArgs {
+	const args: { version: string | null; artifacts: string | null; out: string | null } = {
+		version: null,
+		artifacts: null,
+		out: null,
+	};
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === '--version') args.version = argv[++i];
@@ -54,15 +71,17 @@ function parseArgs(argv) {
 		else if (a === '--out') args.out = argv[++i];
 		else throw new Error(`unknown arg: ${a}`);
 	}
-	for (const k of ['version', 'artifacts', 'out']) {
+	for (const k of ['version', 'artifacts', 'out'] as const) {
 		if (!args[k]) throw new Error(`missing required --${k}`);
 	}
-	return args;
+	// All three keys are non-null after the check loop above; the `as` is
+	// purely for the type system since TS can't narrow through the loop.
+	return args as BuildArgs;
 }
 
 // --- archive extraction -------------------------------------------------
 
-function extractBinary(archivePath, binName, destDir) {
+function extractBinary(archivePath: string, binName: string, destDir: string): void {
 	mkdirSync(destDir, { recursive: true });
 	if (archivePath.endsWith('.tar.xz')) {
 		// dist tarballs contain a top-level dir like runfile-cli-<target>/run
@@ -74,7 +93,9 @@ function extractBinary(archivePath, binName, destDir) {
 		mkdirSync(tmp, { recursive: true });
 		execFileSync('unzip', ['-q', archivePath, '-d', tmp], { stdio: 'inherit' });
 		// Find the binary anywhere under tmp and move it to destDir
-		const found = execFileSync('find', [tmp, '-name', binName, '-type', 'f'], { encoding: 'utf8' }).trim().split('\n')[0];
+		const found = execFileSync('find', [tmp, '-name', binName, '-type', 'f'], { encoding: 'utf8' })
+			.trim()
+			.split('\n')[0];
 		if (!found) throw new Error(`binary ${binName} not found in ${archivePath}`);
 		copyFileSync(found, join(destDir, binName));
 		rmSync(tmp, { recursive: true, force: true });
@@ -85,7 +106,18 @@ function extractBinary(archivePath, binName, destDir) {
 
 // --- package builder ----------------------------------------------------
 
-function writePackage({ outDir, version, artifactsDir }) {
+interface WritePackageOptions {
+	readonly outDir: string;
+	readonly version: string;
+	readonly artifactsDir: string;
+}
+
+interface WritePackageResult {
+	readonly pkgName: string;
+	readonly pkgDir: string;
+}
+
+function writePackage({ outDir, version, artifactsDir }: WritePackageOptions): WritePackageResult {
 	const pkgDir = join(outDir, PUBLIC_NAME);
 	const binDir = join(pkgDir, 'bin');
 	mkdirSync(binDir, { recursive: true });
@@ -130,7 +162,7 @@ const { spawnSync } = require('node:child_process');
 
 const KEY = process.platform + '-' + process.arch;
 const BINARIES = ${JSON.stringify(
-		Object.fromEntries(PLATFORMS.map(p => [p.key, p.bin])),
+		Object.fromEntries(PLATFORMS.map((p) => [p.key, p.bin])),
 		null,
 		2,
 	)};
@@ -152,17 +184,14 @@ process.exit(result.status == null ? 1 : result.status);
 	writeFileSync(join(binDir, 'run.js'), stub, { mode: 0o755 });
 
 	// README in the package so npmjs.com has something to show.
-	writeFileSync(
-		join(pkgDir, 'README.md'),
-		`# ${SCOPE}/${PUBLIC_NAME}\n\nSee ${REPO_URL} for documentation.\n`,
-	);
+	writeFileSync(join(pkgDir, 'README.md'), `# ${SCOPE}/${PUBLIC_NAME}\n\nSee ${REPO_URL} for documentation.\n`);
 
 	return { pkgName: `${SCOPE}/${PUBLIC_NAME}`, pkgDir };
 }
 
 // --- main ---------------------------------------------------------------
 
-function main() {
+function main(): void {
 	const { version, artifacts, out } = parseArgs(process.argv.slice(2));
 	const artifactsAbs = resolve(artifacts);
 	const outAbs = resolve(out);
@@ -181,6 +210,7 @@ function main() {
 try {
 	main();
 } catch (e) {
-	console.error(`error: ${e.message}`);
+	const message = e instanceof Error ? e.message : String(e);
+	console.error(`error: ${message}`);
 	process.exit(1);
 }
