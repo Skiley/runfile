@@ -308,6 +308,12 @@ crates/
   `base64_encode(s)`,
   `base64_decode(s)` (errors on `InvalidBase64` / `NonUtf8Decoded`), `concat(s1, s2, ...)` (variadic, 1+ args),
   `join(sep, s1, s2, ...)` (variadic, 1+ args; `join(sep)` with no items returns `""`),
+  `nth(s, sep, i)` (split `s` by `sep`, return the `i`-th part; out-of-bounds → `""`; non-numeric or negative
+  `i` → `InvalidNumber`; follows Rust `str::split` semantics including the empty-`sep` edge case),
+  `first(s, sep)` / `last(s, sep)` (sugar for the first / last part of `s.split(sep)` — `last`
+  is the canonical "basename" idiom; both return `""` when the input is empty or starts/ends with the
+  separator), `count_parts(s, sep)` (number of parts as a decimal string; always ≥ 1, since `"".split(",")`
+  yields `[""]` per Rust split semantics — pair with `nth` to bound-check before indexing),
   `shell_quote(s)` (per-shell single-arg quoting via [`quote_for_shell`] dispatching on `RUN.shell` —
   POSIX/fish use `'...'` with `'\''` escape, PowerShell uses `'...'` with `''` escape, cmd uses `"..."` with
   `""` escape; lets users inline arbitrary bytes — newlines, `$`, `"`, `'`, JSON, etc. — into shell commands

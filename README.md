@@ -242,6 +242,7 @@ and work as full substitution bodies *or* as chain segments:
   //   transform : escape, repeat, replace_all, remove_all
   //   regex     : regex_replace, regex_remove, regex_matches
   //   build     : concat, join
+  //   split     : nth, first, last, count_parts
   //   encoding  : base64_encode, base64_decode
   //   shell     : shell_quote
   //   variables : define
@@ -253,6 +254,13 @@ and work as full substitution bodies *or* as chain segments:
   "go test {{ replace_all(ARGS.flags, ' ', ' -tag=') }}",
   // Strip every match of a regex (here: collapse whitespace runs to a single space):
   "echo {{ regex_replace(ARGS.text, '\\s+', ' ') }}",
+  // Split-by-separator scalar accessors — string in, string out, no list type:
+  // basename idiom (last segment after `/`); empty string when input ends in `/`.
+  "echo basename={{ last(ARGS.path, '/') }}",
+  // Pull out the N-th comma-separated field; out-of-bounds returns "".
+  "echo target={{ nth(ARGS.csv, ',', '1') }}",
+  // Pair `count_parts` with `nth` to bound-check before indexing:
+  // "if": "{{ count_parts(ARGS.csv, ',') == '3' }}"
   // Boolean-returning helpers are valid DSL `Truthy` values — use them in `if`:
   // "if": "{{ starts_with(ARGS.path, '/usr') }}"
   // "if": "{{ regex_matches(ARGS.tag, '^v[0-9]+\\.[0-9]+$') }}"

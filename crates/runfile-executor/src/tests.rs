@@ -6929,6 +6929,232 @@ mod functions {
 		assert_eq!(result, "true");
 	}
 
+	// ── nth / first / last / count_parts ──
+
+	#[test]
+	fn nth_indexes_into_split_result() {
+		let args = RunArgs::parse(&["--csv=a,b,c".into()]);
+		assert_eq!(
+			args.substitute("{{ nth(ARGS.csv, ',', '0') }}", &HashMap::new())
+				.unwrap(),
+			"a"
+		);
+		assert_eq!(
+			args.substitute("{{ nth(ARGS.csv, ',', '1') }}", &HashMap::new())
+				.unwrap(),
+			"b"
+		);
+		assert_eq!(
+			args.substitute("{{ nth(ARGS.csv, ',', '2') }}", &HashMap::new())
+				.unwrap(),
+			"c"
+		);
+	}
+
+	#[test]
+	fn nth_out_of_bounds_returns_empty() {
+		// Documented: out-of-bounds is empty string, not an error. Lets
+		// users compose without bound-checking when an empty result is
+		// acceptable.
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ nth('a,b', ',', '5') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "");
+	}
+
+	#[test]
+	fn nth_multi_char_separator() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ nth('one::two::three', '::', '1') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "two");
+	}
+
+	#[test]
+	fn nth_preserves_empty_parts() {
+		// Trailing/leading separator yields empty parts that nth must
+		// surface verbatim — this is what makes the "missing slot" vs
+		// "empty slot" distinction meaningful when paired with count_parts.
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ nth('a,,c', ',', '1') }}", &HashMap::new()).unwrap(),
+			""
+		);
+		assert_eq!(
+			args.substitute("{{ nth(',a', ',', '0') }}", &HashMap::new()).unwrap(),
+			""
+		);
+	}
+
+	#[test]
+	fn nth_negative_index_errors_as_invalid_number() {
+		// `parse_count` uses `usize::from_str`, so negative indices are
+		// rejected — surface as InvalidNumber so the user gets a clear
+		// pointer to the bad arg.
+		let args = RunArgs::parse(&[]);
+		let err = args
+			.substitute("{{ nth('a,b', ',', '-1') }}", &HashMap::new())
+			.unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::InvalidNumber { ref name, .. } if name == "nth"
+		));
+	}
+
+	#[test]
+	fn nth_non_numeric_index_errors() {
+		let args = RunArgs::parse(&[]);
+		let err = args
+			.substitute("{{ nth('a,b', ',', 'one') }}", &HashMap::new())
+			.unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::InvalidNumber { ref name, .. } if name == "nth"
+		));
+	}
+
+	#[test]
+	fn nth_wrong_arity_errors() {
+		let args = RunArgs::parse(&[]);
+		let err = args.substitute("{{ nth('a,b', ',') }}", &HashMap::new()).unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::FunctionArity { ref name, got: 2, .. } if name == "nth"
+		));
+	}
+
+	#[test]
+	fn nth_index_from_args() {
+		// Index can come from a substituted source — `parse_count` runs on
+		// the resolved value, so `--i=2` Just Works.
+		let args = RunArgs::parse(&["--csv=a,b,c".into(), "--i=2".into()]);
+		let result = args
+			.substitute("{{ nth(ARGS.csv, ',', ARGS.i) }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "c");
+	}
+
+	#[test]
+	fn first_returns_first_part() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ first('a,b,c', ',') }}", &HashMap::new()).unwrap(),
+			"a"
+		);
+	}
+
+	#[test]
+	fn first_of_empty_string_is_empty() {
+		// `"".split(",")` yields `[""]`, so the first part is `""`.
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ first('', ',') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "");
+	}
+
+	#[test]
+	fn first_with_no_separator_present_returns_whole_string() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ first('hello world', ',') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "hello world");
+	}
+
+	#[test]
+	fn last_returns_last_part() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ last('a,b,c', ',') }}", &HashMap::new()).unwrap(),
+			"c"
+		);
+	}
+
+	#[test]
+	fn last_basename_idiom() {
+		// `last(path, '/')` is the canonical "basename" use case.
+		let args = RunArgs::parse(&["--path=/usr/local/bin/run".into()]);
+		let result = args.substitute("{{ last(ARGS.path, '/') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "run");
+	}
+
+	#[test]
+	fn last_trailing_separator_yields_empty() {
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ last('a,b,', ',') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "");
+	}
+
+	#[test]
+	fn count_parts_basic() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ count_parts('a,b,c', ',') }}", &HashMap::new())
+				.unwrap(),
+			"3"
+		);
+	}
+
+	#[test]
+	fn count_parts_empty_string_is_one() {
+		// Rust split semantics: `"".split(",")` → `[""]` (one element).
+		let args = RunArgs::parse(&[]);
+		let result = args.substitute("{{ count_parts('', ',') }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "1");
+	}
+
+	#[test]
+	fn count_parts_counts_trailing_empty_part() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ count_parts('a,b,', ',') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "3");
+	}
+
+	#[test]
+	fn count_parts_no_separator_present_is_one() {
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute("{{ count_parts('hello world', ',') }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "1");
+	}
+
+	#[test]
+	fn count_parts_works_as_dsl_value() {
+		// `count_parts` returns a decimal string — usable in `==` checks
+		// inside the substitution DSL.
+		let args = RunArgs::parse(&["--csv=a,b,c".into()]);
+		let result = args
+			.substitute("{{ count_parts(ARGS.csv, ',') == '3' }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "true");
+	}
+
+	#[test]
+	fn split_accessors_compose_with_other_functions() {
+		// nth + to_upper composition: pull a field out, transform it.
+		let args = RunArgs::parse(&["--csv=alice,bob,carol".into()]);
+		let result = args
+			.substitute("{{ to_upper(nth(ARGS.csv, ',', '1')) }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "BOB");
+	}
+
+	#[test]
+	fn split_accessors_work_in_chain_segments() {
+		// Function calls are valid chain segments — `nth` can be the
+		// fallback or the leading segment.
+		let args = RunArgs::parse(&[]);
+		let result = args
+			.substitute(
+				"host={{ ARGS.host ? nth('default,fallback', ',', '0') }}",
+				&HashMap::new(),
+			)
+			.unwrap();
+		assert_eq!(result, "host=default");
+	}
+
 	// ── shell_quote ──
 
 	fn args_with_shell(shell: &str) -> RunArgs {
