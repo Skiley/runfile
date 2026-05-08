@@ -277,9 +277,16 @@ crates/
   calls remain bare. Two quote forms exist:
   - **Single quotes (`'...'`) — interpolated string**: stripped at evaluation, with any nested `{{ ... }}` blocks
     inside resolved through the regular substitution machinery. So `'docker -f {{ VARS.compose }} pull'`
-    becomes `docker -f services/web.yml pull`. Required if the literal contains `,`/`(`/`)`/`?`. The
-    substitution walker ([`find_substitution_close`]) is quote/depth-aware so the outer `}}` doesn't close on
-    a `}}` that's part of a single-quoted nested substitution.
+    becomes `docker -f services/web.yml pull`. Required if the literal contains `,`/`(`/`)`/`?`. Nested
+    `{{ ... }}` blocks are **opaque** to every outer scanner ([`find_substitution_close`],
+    [`strip_single_quotes`], [`split_function_args`], [`split_chain_segments`], [`parse_function_call`],
+    [`looks_like_dsl`]) — they all skip past a nested block via [`skip_nested_subst`] (which recurses
+    through `find_substitution_close`) so the inner block's quotes / parens / commas / `?` operators can't
+    bleed into outer state. This means `'system-images;{{ nth(VARS.part, ' ', '0') }}'` is a clean
+    single-quoted literal even though the inner `nth(...)` uses its own `' '` separator arg, and
+    `concat('a', nth(VARS.x, ',', '0'))` splits args correctly even though the inner `nth(...)` has its
+    own commas. The same opacity rule applies in the DSL parser tokenizer
+    ([`runfile_parser::dsl::tokenize`]).
   - **Double quotes (`"..."`) — fully literal**: the quote characters are part of the value (so `"foo"` is the
     5-character string `"foo"`). No interpolation inside. Rare-but-useful when you need the actual `"` chars in
     your output. The splitter still treats `"..."` as a grouping boundary so commas / `?` inside don't split.

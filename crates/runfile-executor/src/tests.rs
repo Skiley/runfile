@@ -8002,6 +8002,73 @@ mod quote_rework {
 		assert_eq!(result, "[]");
 	}
 
+	// ── Nested `{{ }}` inside single-quoted literals ──
+
+	#[test]
+	fn single_quoted_literal_with_nested_subst_using_quoted_arg() {
+		// User-reported pattern: a `'...'` literal whose nested `{{ ... }}`
+		// uses its own single-quoted arg (`' '` separator). The inner `'`
+		// chars must NOT terminate the outer literal.
+		let args = RunArgs::parse(&[]);
+		args.vars
+			.lock()
+			.unwrap()
+			.insert("part".to_string(), "android-30 google_apis_playstore".to_string());
+		args.vars
+			.lock()
+			.unwrap()
+			.insert("arch".to_string(), "x86_64".to_string());
+		let result = args
+			.substitute(
+				"{{ define(image, 'system-images;{{ nth(VARS.part, ' ', '0') }};{{ nth(VARS.part, ' ', '1') }};{{ VARS.arch }}') }}",
+				&HashMap::new(),
+			)
+			.unwrap();
+		assert_eq!(result, "");
+		let v = args.substitute("{{ VARS.image }}", &HashMap::new()).unwrap();
+		assert_eq!(v, "system-images;android-30;google_apis_playstore;x86_64");
+	}
+
+	#[test]
+	fn single_quoted_literal_interpolates_nested_subst() {
+		// Plain interpolation case: nested subst inside `'...'` resolves.
+		let args = RunArgs::parse(&[]);
+		args.vars.lock().unwrap().insert("v".to_string(), "1.2.3".to_string());
+		let result = args
+			.substitute("{{ ARGS.tag ? 'v{{ VARS.v }}-stable' }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "v1.2.3-stable");
+	}
+
+	#[test]
+	fn function_args_with_nested_subst_using_quotes() {
+		// `concat(...)` where each arg is itself a nested subst (function
+		// call) that uses its own quoted args. The outer split must treat
+		// nested `{{ ... }}` as opaque so the inner `,` and `'` don't
+		// disturb arg boundaries.
+		let args = RunArgs::parse(&[]);
+		args.vars.lock().unwrap().insert("p".to_string(), "a:b:c".to_string());
+		let result = args
+			.substitute(
+				"{{ concat('[', nth(VARS.p, ':', '0'), '|', nth(VARS.p, ':', '2'), ']') }}",
+				&HashMap::new(),
+			)
+			.unwrap();
+		assert_eq!(result, "[a|c]");
+	}
+
+	#[test]
+	fn dsl_condition_with_nested_subst_using_quotes() {
+		// DSL detection (`==`) kicks in correctly when one side has a
+		// nested subst whose body uses its own quoted args.
+		let args = RunArgs::parse(&[]);
+		args.vars.lock().unwrap().insert("p".to_string(), "a:b:c".to_string());
+		let result = args
+			.substitute("{{ nth(VARS.p, ':', '1') == 'b' }}", &HashMap::new())
+			.unwrap();
+		assert_eq!(result, "true");
+	}
+
 	// ── DSL inside `{{ }}` substitutions ──
 
 	#[test]

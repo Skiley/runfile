@@ -228,60 +228,17 @@ fn tokenize(source: &str) -> Result<Vec<Token>, DslParseError> {
 
 		// `{{ ... }}` substitution — capture the raw text including delimiters.
 		// The substituter (in `runfile-executor::args`) handles the inner
-		// content; here we just need to find the matching `}}` while tracking
-		// nested `{{ }}` and quote state so we don't close on a `}}` that's
-		// part of a single-quoted interpolated string.
+		// content; here we just need to find the matching `}}`. Nested
+		// `{{ ... }}` blocks (including ones that appear inside single-
+		// quoted interpolated literals) are opaque — we recurse via
+		// [`find_subst_close`] so their inner quotes can't bleed into our
+		// outer state.
 		if b == b'{' && bytes.get(i + 1) == Some(&b'{') {
 			let start = i;
-			i += 2;
-			let mut depth = 0i32;
-			let mut in_single = false;
-			let mut in_double = false;
-			let mut closed = false;
-			while i < bytes.len() {
-				let c = bytes[i];
-				if in_single {
-					if c == b'\'' {
-						in_single = false;
-					}
-					i += 1;
-					continue;
-				}
-				if in_double {
-					if c == b'"' {
-						in_double = false;
-					}
-					i += 1;
-					continue;
-				}
-				match c {
-					b'\'' => {
-						in_single = true;
-						i += 1;
-					}
-					b'"' => {
-						in_double = true;
-						i += 1;
-					}
-					b'{' if bytes.get(i + 1) == Some(&b'{') => {
-						depth += 1;
-						i += 2;
-					}
-					b'}' if bytes.get(i + 1) == Some(&b'}') => {
-						if depth == 0 {
-							i += 2;
-							closed = true;
-							break;
-						}
-						depth -= 1;
-						i += 2;
-					}
-					_ => i += 1,
-				}
-			}
-			if !closed {
-				return Err(DslParseError::UnterminatedSubstitution(start));
-			}
+			let body_start = i + 2;
+			let close_rel =
+				find_subst_close(&source[body_start..]).ok_or(DslParseError::UnterminatedSubstitution(start))?;
+			i = body_start + close_rel + 2;
 			let text = source[start..i].to_string();
 			tokens.push(Token {
 				kind: TokKind::Substitution,
@@ -326,10 +283,22 @@ fn read_value(source: &str, start: usize) -> Result<(usize, String), DslParseErr
 	let mut i = start;
 	let first = bytes[i];
 
-	// Quoted string — read until matching quote.
+	// Quoted string — read until matching quote. Nested `{{ ... }}` blocks
+	// inside the string are opaque, so a `'` inside such a nested block
+	// (e.g. `'foo {{ nth(x, ' ', 0) }} bar'`) does NOT terminate the outer
+	// literal. Single quotes interpolate (per the substituter) and so can
+	// contain nested subs; double quotes are verbatim, but we still skip
+	// nested subs so we don't accidentally end the literal on an inner `"`.
 	if first == b'"' || first == b'\'' {
 		i += 1;
 		while i < bytes.len() && bytes[i] != first {
+			if bytes[i] == b'{' && bytes.get(i + 1) == Some(&b'{') {
+				let body_start = i + 2;
+				let close_rel =
+					find_subst_close(&source[body_start..]).ok_or(DslParseError::UnterminatedSubstitution(i))?;
+				i = body_start + close_rel + 2;
+				continue;
+			}
 			i += 1;
 		}
 		if i >= bytes.len() {
@@ -345,7 +314,10 @@ fn read_value(source: &str, start: usize) -> Result<(usize, String), DslParseErr
 			i += 1;
 		}
 		// If followed by `(`, this is a function call — read the balanced
-		// argument list as part of the value.
+		// argument list as part of the value. Nested `{{ ... }}` is opaque
+		// (its inner quotes / parens belong to the inner expression);
+		// allowed at top level and inside single-quoted (interpolated)
+		// literals, but NOT inside double-quoted (verbatim) literals.
 		if i < bytes.len() && bytes[i] == b'(' {
 			i += 1;
 			let mut depth = 1i32;
@@ -353,6 +325,13 @@ fn read_value(source: &str, start: usize) -> Result<(usize, String), DslParseErr
 			let mut in_double = false;
 			while i < bytes.len() && depth > 0 {
 				let c = bytes[i];
+				if !in_double && c == b'{' && bytes.get(i + 1) == Some(&b'{') {
+					let body_start = i + 2;
+					let close_rel =
+						find_subst_close(&source[body_start..]).ok_or(DslParseError::UnterminatedSubstitution(i))?;
+					i = body_start + close_rel + 2;
+					continue;
+				}
 				if in_single {
 					if c == b'\'' {
 						in_single = false;
@@ -395,6 +374,67 @@ fn read_value(source: &str, start: usize) -> Result<(usize, String), DslParseErr
 	}
 
 	Err(DslParseError::UnexpectedChar(first as char, start))
+}
+
+/// Find the byte position of the matching `}}` closing the substitution
+/// whose body starts at the beginning of `s`. Mirrors
+/// `runfile-executor::args::find_substitution_close` — kept as a private
+/// helper here because the parser crate doesn't depend on the executor.
+///
+/// Inside `'...'` (interpolated) literals, nested `{{ ... }}` blocks are
+/// recursively skipped so their inner quotes don't toggle outer state.
+/// Inside `"..."` (verbatim) literals, `{{`/`}}` are literal text.
+fn find_subst_close(s: &str) -> Option<usize> {
+	let bytes = s.as_bytes();
+	let mut i = 0usize;
+	let mut in_single = false;
+	let mut in_double = false;
+	while i < bytes.len() {
+		let b = bytes[i];
+		if in_double {
+			if b == b'"' {
+				in_double = false;
+			}
+			i += 1;
+			continue;
+		}
+		if in_single {
+			if b == b'\'' {
+				in_single = false;
+				i += 1;
+				continue;
+			}
+			if b == b'{' && bytes.get(i + 1) == Some(&b'{') {
+				let body_start = i + 2;
+				let close_rel = find_subst_close(&s[body_start..])?;
+				i = body_start + close_rel + 2;
+				continue;
+			}
+			i += 1;
+			continue;
+		}
+		if b == b'\'' {
+			in_single = true;
+			i += 1;
+			continue;
+		}
+		if b == b'"' {
+			in_double = true;
+			i += 1;
+			continue;
+		}
+		if b == b'{' && bytes.get(i + 1) == Some(&b'{') {
+			let body_start = i + 2;
+			let close_rel = find_subst_close(&s[body_start..])?;
+			i = body_start + close_rel + 2;
+			continue;
+		}
+		if b == b'}' && bytes.get(i + 1) == Some(&b'}') {
+			return Some(i);
+		}
+		i += 1;
+	}
+	None
 }
 
 fn is_bareword_byte(b: u8) -> bool {
