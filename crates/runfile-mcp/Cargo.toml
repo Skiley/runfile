@@ -8,8 +8,8 @@ description = "MCP (Model Context Protocol) server for Runfile"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-rmcp = { version = "1.6", features = ["server", "transport-io", "macros"] }
-tokio = { version = "1", features = ["full"] }
+rmcp = { workspace = true }
+tokio = { workspace = true }
 runfile-parser = { path = "../runfile-parser" }
 
 [dev-dependencies]

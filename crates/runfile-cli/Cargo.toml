@@ -19,13 +19,13 @@ runfile-parser = { path = "../runfile-parser" }
 runfile-shell = { path = "../runfile-shell" }
 runfile-settings = { path = "../runfile-settings" }
 runfile-crypto = { path = "../runfile-crypto" }
-hex = "0.4"
+hex = { workspace = true }
 runfile-env = { path = "../runfile-env" }
 runfile-executor = { path = "../runfile-executor" }
 runfile-converters = { path = "../runfile-converters" }
 runfile-generators = { path = "../runfile-generators" }
 runfile-mcp = { path = "../runfile-mcp" }
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true }
 notify = { workspace = true }
 globset = { workspace = true }
 which = { workspace = true }

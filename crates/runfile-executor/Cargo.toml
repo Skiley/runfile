@@ -6,7 +6,7 @@ license.workspace = true
 description = "Command execution engine for Runfile"
 
 [dependencies]
-base64 = "0.22"
+base64 = { workspace = true }
 dirs = { workspace = true }
 globset = { workspace = true }
 regex = { workspace = true }
@@ -18,10 +18,10 @@ runfile-parser = { path = "../runfile-parser" }
 runfile-shell = { path = "../runfile-shell" }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_JobObjects", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+windows-sys = { workspace = true }
 
 [dev-dependencies]
 runfile-crypto = { path = "../runfile-crypto" }

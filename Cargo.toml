@@ -35,6 +35,16 @@ notify = { version = "8.2.0", default-features = false, features = ["macos_fseve
 globset = "0.4.18"
 shlex = "1.3.0"
 regex = "1.12.3"
+aes-gcm = "0.10.3"
+base64 = "0.22.1"
+hex = "0.4.3"
+sha2 = "0.11.0"
+subtle = "2.6.1"
+zeroize = "1.8.2"
+libc = "0.2.186"
+windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_JobObjects", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+tokio = { version = "1.52.2", features = ["full"] }
+rmcp = { version = "1.6.0", features = ["server", "transport-io", "macros"] }
 
 [profile.dev.package."*"]
 opt-level = 3
