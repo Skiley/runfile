@@ -167,9 +167,9 @@ $ run :env inject -f .env.production -- ./deploy.sh       # encrypted values aut
 
 #### Powerful argument substitution
 
-Positional, named, flags, env vars, and runtime context (`{{ RUN.os }}` / `{{ RUN.shell }}` / `{{ RUN.cwd }}` /
-`{{ RUN.file }}` / `{{ RUN.parent }}`) — with chained fallbacks and required values. The `{{ ... }}` syntax
-avoids collisions with shell `$(...)` command substitution.
+Positional, named, flags, env vars, and runtime context (`{{ RUN.os }}` / `{{ RUN.arch }}` / `{{ RUN.shell }}` /
+`{{ RUN.cwd }}` / `{{ RUN.file }}` / `{{ RUN.parent }}`) — with chained fallbacks and required values. The
+`{{ ... }}` syntax avoids collisions with shell `$(...)` command substitution.
 
 ```jsonc
 "PORT": "{{ ARGS.port ? ENV.PORT ? '3000' }}",

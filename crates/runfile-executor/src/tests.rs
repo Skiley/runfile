@@ -4329,6 +4329,34 @@ fn run_shell_resolves() {
 }
 
 #[test]
+fn run_arch_resolves() {
+	// Override arch directly so the assertion doesn't depend on the host
+	// architecture (CI runners are mostly x86_64 but ARM is increasingly
+	// common). The detection itself is exercised by `run_arch_detection_*`.
+	let args = RunArgs::parse(&[]).with_run_context(RunContext {
+		os: "linux".to_string(),
+		arch: "arm64".to_string(),
+		shell: "bash".to_string(),
+		..Default::default()
+	});
+	let result = args.substitute_no_env("echo {{ RUN.arch }}").unwrap();
+	assert_eq!(result, "echo arm64");
+}
+
+#[test]
+fn run_arch_detection_known_values_normalised() {
+	// `RunContext::new` populates `arch` via `detect_current_arch()`. The
+	// host this test runs on must have one of the four normalised values
+	// — not the raw `std::env::consts::ARCH` strings like "x86_64".
+	let ctx = RunContext::new("bash");
+	assert!(
+		matches!(ctx.arch.as_str(), "x86-64" | "arm64" | "riscv64" | "unknown"),
+		"unexpected RUN.arch value: {:?}",
+		ctx.arch
+	);
+}
+
+#[test]
 fn run_unknown_key_errors() {
 	let args = args_with_run("bash");
 	let err = args.substitute_no_env("echo {{ RUN.unknown }}").unwrap_err();

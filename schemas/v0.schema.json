@@ -133,7 +133,7 @@
 			"properties": {
 				"if": {
 					"type": "string",
-					"description": "Boolean expression. Supports comparisons (==, !=), logical operators (&&, ||, !), parentheses, and substitutions ({{ ARGS.x }}, {{ ENV.X }}, {{ FLAGS.x }}, {{ LOOP.x }}, {{ RUN.os }}, {{ RUN.shell }}). Mixing && and || requires parentheses. Truthiness: only the empty string is falsy."
+					"description": "Boolean expression. Supports comparisons (==, !=), logical operators (&&, ||, !), parentheses, and substitutions ({{ ARGS.x }}, {{ ENV.X }}, {{ FLAGS.x }}, {{ LOOP.x }}, {{ RUN.os }}, {{ RUN.arch }}, {{ RUN.shell }}). Mixing && and || requires parentheses. Truthiness: only the empty string is falsy."
 				},
 				"then": {
 					"description": "Steps executed when the condition is truthy. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",

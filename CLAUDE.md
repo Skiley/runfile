@@ -604,16 +604,19 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   presence. Answers are cached per (kind, key) so the same value is asked at most once per run, even across
   `@target` invocations (the `Arc<dyn StdinPrompter>` is propagated through `RunnerDependencyResolver`). Works with
   `--dry-run` too (the dry-run path also goes through `RunArgs::substitute`).
-- Runtime context substitutions: `{{ RUN.os }}` / `{{ RUN.shell }}` / `{{ RUN.cwd }}` / `{{ RUN.file }}` /
-  `{{ RUN.parent }}` expose runtime info so users can write inline `if` conditions for cross-platform branching
-  (e.g. `"if": "{{ RUN.os }} == windows"`) or reference paths in env values, `workingDirectory`, etc. Keys:
+- Runtime context substitutions: `{{ RUN.os }}` / `{{ RUN.arch }}` / `{{ RUN.shell }}` / `{{ RUN.cwd }}` /
+  `{{ RUN.file }}` / `{{ RUN.parent }}` expose runtime info so users can write inline `if` conditions for
+  cross-platform branching (e.g. `"if": "{{ RUN.os }} == windows"`) or reference paths in env values,
+  `workingDirectory`, etc. Keys:
   - `RUN.os` — `"windows"` / `"linux"` / `"mac"`
+  - `RUN.arch` — `"x86-64"` / `"arm64"` / `"riscv64"` / `"unknown"` (friendly names mapped from
+    `std::env::consts::ARCH`; reflects the binary's compile-time target arch, not the host CPU)
   - `RUN.shell` — `"bash"` / `"zsh"` / `"sh"` / `"fish"` / `"powershell"` / `"cmd"`
   - `RUN.cwd` — caller's current working directory (absolute path; fixed for the whole run)
   - `RUN.file` — path to the source Runfile of the *currently-executing target*
   - `RUN.parent` — directory of the currently-executing target's source Runfile
   Unknown RUN keys are a hard error. RUN values are not redacted by `substitute_redacted` (they aren't secrets).
-  `RUN.shell`/`RUN.file`/`RUN.parent` are refreshed per-target by the runner's `ensure_run_context`, so a target
+  `RUN.os`/`RUN.arch` are fixed for the whole run. `RUN.shell`/`RUN.file`/`RUN.parent` are refreshed per-target by the runner's `ensure_run_context`, so a target
   defined in an included file — or a target whose `forceShell` swap changes the active shell — sees values that
   match its own context. `RUN.cwd` is the caller cwd captured once at the top-level CLI invocation.
 - `forceShell` and `workingDirectory` accept `{{ ... }}` substitutions. `workingDirectory` is a free-form path

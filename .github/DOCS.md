@@ -523,11 +523,12 @@ Flags referenced by `{{ FLAGS.key }}` are consumed and will not appear in `{{ AR
 ### Runtime context — `{{ RUN.* }}`
 
 Reference the active execution context to write conditional commands without
-duplicating logic into multiple targets. Five runtime values are exposed as substitutions:
+duplicating logic into multiple targets. Six runtime values are exposed as substitutions:
 
 | Substitution    | Resolves to                                                                                                                                 |
 |-----------------|---------------------------------------------------------------------------------------------------------------------------------------------|
 | `{{ RUN.os }}`     | `"windows"`, `"linux"`, or `"mac"`.                                                                                                         |
+| `{{ RUN.arch }}`   | `"x86-64"`, `"arm64"`, `"riscv64"`, or `"unknown"` (friendly names mapped from the binary's compile-time target arch).                      |
 | `{{ RUN.shell }}`  | `"bash"`, `"zsh"`, `"sh"`, `"fish"`, `"powershell"`, or `"cmd"` — the shell that will run the commands (after any `forceShell` override).   |
 | `{{ RUN.cwd }}`    | Caller's current working directory (absolute path). Fixed for the whole run.                                                                |
 | `{{ RUN.file }}`   | Path to the source `Runfile.json` of the currently-executing target. Refreshed per-target so a target defined in an included file shows that include's path. |
@@ -602,6 +603,7 @@ $ run dev                        # PORT=3000, NODE_OPTIONS=
 | `{{ ENV.key ? }}`            | Environment variable, or empty string if not set.                |
 | `{{ ENV.key }}`              | Environment variable. **Error** if not set.                      |
 | `{{ RUN.os }}`               | `"windows"`, `"linux"`, or `"mac"`.                              |
+| `{{ RUN.arch }}`             | `"x86-64"`, `"arm64"`, `"riscv64"`, or `"unknown"`.              |
 | `{{ RUN.shell }}`            | `"bash"`, `"zsh"`, `"sh"`, `"fish"`, `"powershell"`, or `"cmd"`. |
 | `{{ RUN.cwd }}`              | Caller's current working directory (absolute).                   |
 | `{{ RUN.file }}`             | Source Runfile path of the currently-executing target.           |
