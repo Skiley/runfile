@@ -458,57 +458,104 @@ pub fn make_absolute(p: &str, working_dir: &Path) -> PathBuf {
 	}
 }
 
-/// Errors that can surface while flattening a target's `commands` for
-/// detached spawning.
+/// Context for [`collect_shell_only_leaves`] — drives the error message when
+/// a `@target` invocation is encountered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellLeafContext {
+	/// `detach: true` flatten — spawning each leaf as an independent background process.
+	Detach,
+	/// `sameShell: true` flatten — joining leaves into a single shell invocation.
+	SameShell,
+}
+
+impl ShellLeafContext {
+	fn target_call_message(self, target: &str) -> String {
+		match self {
+			ShellLeafContext::Detach => format!(
+				"`@target` invocations are not supported inside `detach: true` targets — \
+				 detach is meant for fire-and-forget shell commands. Found `@{target}` in detached target."
+			),
+			ShellLeafContext::SameShell => format!(
+				"`@target` invocations are not supported inside `sameShell: true` targets — \
+				 sameShell joins all command steps into a single shell invocation, and \
+				 `@target` calls run in their own shell context. Found `@{target}`."
+			),
+		}
+	}
+}
+
+/// Errors that can surface while flattening a target's `commands` to a flat
+/// list of resolved shell strings (used by `detach: true` and
+/// `sameShell: true` targets).
 #[derive(Debug, Error)]
-pub enum DetachFlattenError {
+pub enum ShellLeafFlattenError {
 	#[error("{0}")]
 	Substitution(#[from] SubstitutionError),
 
 	#[error("{0}")]
 	ControlFlow(#[from] ControlFlowError),
 
-	#[error(
-		"`@target` invocations are not supported inside `detach: true` targets — \
-		 detach is meant for fire-and-forget shell commands. Found `@{0}` in detached target."
-	)]
+	#[error("{0}")]
 	TargetCallNotAllowed(String),
 }
 
+/// Backwards-compatible alias for [`ShellLeafFlattenError`] — historically the
+/// only caller of the flatten walker was the detach path.
+pub type DetachFlattenError = ShellLeafFlattenError;
+
 /// Walk a `commands` array as if executing it, but only collect the resulting
 /// shell strings (with substitution applied) into a flat `Vec<String>`. Used
-/// by detached targets where we want to spawn each leaf as an independent
-/// background process.
+/// by:
+///   - `detach: true` targets, which spawn each leaf as an independent
+///     background process.
+///   - `sameShell: true` targets, which join the leaves with a shell-specific
+///     separator and dispatch them as a single shell invocation.
 ///
 /// Differences from regular execution:
 /// - `if` blocks are evaluated and only the chosen branch is collected.
 /// - `for` blocks are expanded; every iteration of the body is collected.
 /// - `when: success` (default) and `when: always` blocks are flattened
-///   (their inner steps are included). `when: failure` blocks are skipped
-///   — there is no runtime "failed" tracking in detached mode, so a
-///   failure-only block can never run.
-/// - `@target` invocations are rejected: they can't be meaningfully
-///   detached without recursing into another target's lifecycle.
+///   (their inner steps are included). `when: failure` blocks are skipped —
+///   there is no runtime "failed" tracking in either context (detach has no
+///   sequential state at all; sameShell collapses everything into one shell
+///   invocation, so we can't usefully observe an inner failure).
+/// - `@target` invocations are rejected. They can't be meaningfully
+///   detached (each one would need its own lifecycle) or merged into a
+///   single shell process (each runs in its own shell context).
+pub fn collect_shell_only_leaves(
+	steps: &[CommandStep],
+	args: &RunArgs,
+	env: &HashMap<String, String>,
+	working_dir: &Path,
+	context: ShellLeafContext,
+) -> Result<Vec<String>, ShellLeafFlattenError> {
+	let mut out: Vec<String> = Vec::new();
+	collect_shell_only_leaves_inner(steps, args, env, working_dir, context, &mut out)?;
+	Ok(out)
+}
+
+/// Backwards-compatible wrapper for the detach use case.
 pub fn collect_detach_leaves(
 	steps: &[CommandStep],
 	args: &RunArgs,
 	env: &HashMap<String, String>,
 	working_dir: &Path,
-) -> Result<Vec<String>, DetachFlattenError> {
-	let mut out: Vec<String> = Vec::new();
-	collect_detach_leaves_inner(steps, args, env, working_dir, &mut out)?;
-	Ok(out)
+) -> Result<Vec<String>, ShellLeafFlattenError> {
+	collect_shell_only_leaves(steps, args, env, working_dir, ShellLeafContext::Detach)
 }
 
-fn collect_detach_leaves_inner(
+fn collect_shell_only_leaves_inner(
 	steps: &[CommandStep],
 	args: &RunArgs,
 	env: &HashMap<String, String>,
 	working_dir: &Path,
+	context: ShellLeafContext,
 	out: &mut Vec<String>,
-) -> Result<(), DetachFlattenError> {
+) -> Result<(), ShellLeafFlattenError> {
 	for step in steps {
-		// Skip blocks that are gated on a failure that can never occur in detach.
+		// Skip blocks that are gated on a failure we can't observe in this
+		// flatten mode (detach has no sequential state; sameShell joins
+		// everything into one process).
 		if step.effective_when() == WhenCondition::Failure {
 			continue;
 		}
@@ -519,10 +566,12 @@ fn collect_detach_leaves_inner(
 				out.push(substituted);
 			}
 			CommandStep::TargetCall(call) => {
-				return Err(DetachFlattenError::TargetCallNotAllowed(call.target.clone()));
+				return Err(ShellLeafFlattenError::TargetCallNotAllowed(
+					context.target_call_message(&call.target),
+				));
 			}
 			CommandStep::When(WhenStep { commands, .. }) => {
-				collect_detach_leaves_inner(commands, args, env, working_dir, out)?;
+				collect_shell_only_leaves_inner(commands, args, env, working_dir, context, out)?;
 			}
 			CommandStep::If(if_step) => {
 				let cond = evaluate_if_condition(if_step, args, env)?;
@@ -531,14 +580,14 @@ fn collect_detach_leaves_inner(
 				} else {
 					if_step.r#else.as_deref().unwrap_or(&[])
 				};
-				collect_detach_leaves_inner(branch, args, env, working_dir, out)?;
+				collect_shell_only_leaves_inner(branch, args, env, working_dir, context, out)?;
 			}
 			CommandStep::For(for_step) => {
 				let iterations = expand_for_iterations(for_step, args, env, working_dir)?;
 				let guard = LoopVarGuard::enter(&args.vars, &for_step.var);
 				for value in iterations {
 					guard.set(value);
-					collect_detach_leaves_inner(&for_step.body, args, env, working_dir, out)?;
+					collect_shell_only_leaves_inner(&for_step.body, args, env, working_dir, context, out)?;
 				}
 				drop(guard);
 			}
@@ -546,7 +595,7 @@ fn collect_detach_leaves_inner(
 				// Same approach as `if`: pick the matching branch using the
 				// current substitution context and only collect that one.
 				let branch = resolve_match_branch(match_step, args, env)?;
-				collect_detach_leaves_inner(branch, args, env, working_dir, out)?;
+				collect_shell_only_leaves_inner(branch, args, env, working_dir, context, out)?;
 			}
 		}
 	}

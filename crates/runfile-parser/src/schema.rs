@@ -913,6 +913,17 @@ pub struct CommandSpec {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub parallel: Option<bool>,
 
+	/// When true, all command steps run in a single shell instance instead of
+	/// each step being dispatched in its own shell. Steps are joined with the
+	/// shell-appropriate sequencing operator so state changes (e.g. `cd`,
+	/// shell variables, `set -e`) persist across steps. Mutually exclusive
+	/// with `parallel`/`detach` having multiple shell invocations — when
+	/// `sameShell: true`, the entire (joined) command runs as one process,
+	/// so `parallel: true` collapses to that single invocation and
+	/// `detach: true` spawns it as one detached process.
+	#[serde(default, rename = "sameShell", skip_serializing_if = "Option::is_none")]
+	pub same_shell: Option<bool>,
+
 	/// Working directory for command execution — a free-form path that supports
 	/// `{{ ... }}` substitution. Defaults to `{{ RUN.parent }}` (the source
 	/// Runfile's directory) when unset. Relative paths are resolved against
@@ -974,6 +985,7 @@ impl CommandSpec {
 			ignore_errors: None,
 			detach: None,
 			parallel: None,
+			same_shell: None,
 			working_directory: None,
 			confirm: None,
 			force_kill_on_sig_int: None,
@@ -1184,6 +1196,12 @@ pub struct Globals {
 	/// When true, continue executing subsequent commands even if one fails.
 	#[serde(default, rename = "ignoreErrors", skip_serializing_if = "Option::is_none")]
 	pub ignore_errors: Option<bool>,
+
+	/// When true, all command steps in every target run in a single shell
+	/// instance instead of each step being dispatched in its own shell. See
+	/// [`CommandSpec::same_shell`].
+	#[serde(default, rename = "sameShell", skip_serializing_if = "Option::is_none")]
+	pub same_shell: Option<bool>,
 
 	/// Working directory for command execution — a free-form path that supports
 	/// `{{ ... }}` substitution. Defaults to `{{ RUN.parent }}` (the source

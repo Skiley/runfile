@@ -2,8 +2,8 @@ use crate::args::{validate_args, RunArgs, SubstitutionError};
 use crate::control_flow::{collect_detach_leaves, DetachFlattenError};
 use crate::env::EnvFileError;
 use crate::executor::{
-	execute_command_with_counter, execute_detached, execute_parallel_with_counter, DependencyResolver, ExecuteError,
-	ExecutionResult,
+	execute_command_with_counter, execute_detached, execute_parallel_with_counter, execute_same_shell_with_counter,
+	join_shell_commands, DependencyResolver, ExecuteError, ExecutionResult,
 };
 use crate::logging::{log_command, log_target_timing, StepCounter};
 use runfile_parser::{
@@ -355,6 +355,8 @@ fn run_target_inner_body(
 	let resolved_working_directory = target_args.substitute(working_directory_template, &pre_env)?;
 	let effective_working_dir = resolve_working_directory_path(&resolved_working_directory, target_runfile_dir);
 
+	let same_shell = spec.same_shell.unwrap_or(false);
+
 	// Handle detached targets: spawn commands in background and return immediately
 	if spec.detach.unwrap_or(false) {
 		let env = crate::env::build_env_with_base(
@@ -374,18 +376,46 @@ fn run_target_inner_body(
 		// because there's no runtime failure tracking in detached mode.
 		let resolved_commands = collect_detach_leaves(&spec.commands, target_args, &env, &effective_working_dir)?;
 
-		for cmd in &resolved_commands {
+		if same_shell {
+			// `detach + sameShell`: join every leaf into a single shell
+			// command and spawn it as ONE detached process. State changes
+			// (`cd`, exported vars, etc.) persist across leaves because they
+			// share the same shell context.
+			let ignore_errors = spec.ignore_errors.unwrap_or(false);
+			let joined = join_shell_commands(&resolved_commands, &shell.kind, ignore_errors);
+
 			let (step, total) = root.step_counter.next_step();
-			log_command(cmd, step, total);
-		}
+			for cmd in &resolved_commands {
+				log_command(cmd, step, total);
+			}
+			// Counter accounting matches `execute_same_shell_with_counter`:
+			// every leaf was counted by `count_target_leaves_recursive` only
+			// when sameShell was false; when true the recursion returned 1.
+			// Either way `subtract_from_total` saturates correctly.
+			if resolved_commands.len() > 1 {
+				root.step_counter.subtract_from_total(resolved_commands.len() - 1);
+			}
 
-		eprintln!(
-			"[runfile] Detaching: spawning {} command(s) in background (parallel)",
-			resolved_commands.len()
-		);
+			eprintln!(
+				"[runfile] Detaching: spawning {} step(s) as 1 background process (sameShell)",
+				resolved_commands.len()
+			);
 
-		for cmd in &resolved_commands {
-			execute_detached(cmd, shell, &env, &effective_working_dir)?;
+			execute_detached(&joined, shell, &env, &effective_working_dir)?;
+		} else {
+			for cmd in &resolved_commands {
+				let (step, total) = root.step_counter.next_step();
+				log_command(cmd, step, total);
+			}
+
+			eprintln!(
+				"[runfile] Detaching: spawning {} command(s) in background (parallel)",
+				resolved_commands.len()
+			);
+
+			for cmd in &resolved_commands {
+				execute_detached(cmd, shell, &env, &effective_working_dir)?;
+			}
 		}
 
 		return Ok(ExecutionResult {
@@ -415,7 +445,28 @@ fn run_target_inner_body(
 	let target_start = Instant::now();
 	let resolver = RunnerDependencyResolver { root };
 
-	let main_result = if spec.parallel.unwrap_or(false) {
+	let main_result = if same_shell {
+		if spec.parallel.unwrap_or(false) {
+			eprintln!(
+				"[runfile] Warning: target \"{target_name}\" sets both `sameShell: true` and `parallel: true`. \
+				 sameShell joins all steps into a single shell invocation, which collapses parallel into one \
+				 process — running as sameShell."
+			);
+		}
+		execute_same_shell_with_counter(
+			spec,
+			shell,
+			target_args,
+			&effective_working_dir,
+			target_runfile_dir,
+			root.available_private_keys,
+			root.timings,
+			&root.step_counter,
+			parent_env,
+			parent_add_to_path_chain,
+			output_prefix,
+		)
+	} else if spec.parallel.unwrap_or(false) {
 		execute_parallel_with_counter(
 			spec,
 			shell,
@@ -504,7 +555,16 @@ fn count_target_leaves_recursive(
 		.get(target_name)
 		.ok_or_else(|| RunError::UnknownTarget(target_name.to_string()))?;
 
-	let count = count_step_leaves_recursive(&spec.commands, runfile, cache, in_progress)?;
+	// `sameShell: true` collapses every leaf into a single shell invocation,
+	// so the target counts as one step toward the global counter regardless
+	// of how many leaves its `commands` tree contains. Without this, the
+	// `(N/total)` ratio would over-estimate the total when sameShell targets
+	// are reachable.
+	let count = if spec.same_shell.unwrap_or(false) {
+		1
+	} else {
+		count_step_leaves_recursive(&spec.commands, runfile, cache, in_progress)?
+	};
 
 	in_progress.remove(target_name);
 	cache.insert(target_name.to_string(), count);

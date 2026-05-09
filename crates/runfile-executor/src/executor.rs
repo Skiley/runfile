@@ -1,6 +1,7 @@
 use crate::args::{check_env_case_duplicates, LoopVarGuard, RunArgs, SubstitutionError};
 use crate::control_flow::{
-	count_leaves, evaluate_if_condition, expand_for_iterations, resolve_match_branch, ControlFlowError,
+	collect_shell_only_leaves, count_leaves, evaluate_if_condition, expand_for_iterations, resolve_match_branch,
+	ControlFlowError, ShellLeafContext, ShellLeafFlattenError,
 };
 use crate::env::{build_env_with_base, EnvFileError};
 use crate::force_kill::ForceKillGuard;
@@ -12,7 +13,7 @@ use crate::stdio_tailer::StdioTailerSet;
 use runfile_parser::{
 	CommandSpec, CommandStep, ExtendStdio, ForStep, IfStep, MatchStep, TargetCallStep, WhenCondition, WhenStep,
 };
-use runfile_shell::ResolvedShell;
+use runfile_shell::{ResolvedShell, ShellKind};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -39,6 +40,9 @@ pub enum ExecuteError {
 
 	#[error("{0}")]
 	ControlFlow(#[from] ControlFlowError),
+
+	#[error("{0}")]
+	ShellLeafFlatten(#[from] ShellLeafFlattenError),
 
 	#[error("Failed to invoke target dependency `@{0}`: {1}")]
 	DependencyFailed(String, String),
@@ -323,6 +327,200 @@ pub fn execute_command_with_counter(
 		commands_run: state.commands_run,
 		failures: state.failures,
 		final_status,
+	})
+}
+
+/// Join a flat list of shell command leaves with the appropriate sequencing
+/// operator for the given shell, honoring `ignore_errors` semantics.
+///
+/// - `ignore_errors == false` (default): use `&&` so the joined command stops
+///   at the first failure. Works on every shell we support — bash/zsh/sh/fish
+///   3.0+, PowerShell 7+ (`&&` is the pipeline-chain operator), and cmd.exe.
+/// - `ignore_errors == true`: use `;` (or `&` for cmd.exe), so subsequent
+///   leaves run regardless of the previous one's exit code.
+///
+/// A single leaf is returned verbatim — no separator added.
+pub fn join_shell_commands(commands: &[String], shell_kind: &ShellKind, ignore_errors: bool) -> String {
+	if commands.len() == 1 {
+		return commands[0].clone();
+	}
+	let separator = match (shell_kind, ignore_errors) {
+		(ShellKind::Cmd, false) => " && ",
+		(ShellKind::Cmd, true) => " & ",
+		(_, false) => " && ",
+		(_, true) => "; ",
+	};
+	commands.join(separator)
+}
+
+/// Execute a `sameShell: true` target.
+///
+/// Walks `spec.commands` to flatten control-flow blocks (`if` / `for` /
+/// `match` / `when`) into a flat list of resolved shell-command strings, then
+/// joins them with [`join_shell_commands`] and dispatches them as **one**
+/// shell invocation. State changes (e.g. `cd`, shell variables, `set -e`)
+/// persist across steps because they all run in the same process.
+///
+/// `@target` invocations inside the command list are rejected — they would
+/// run in their own shell context, which violates the sameShell invariant.
+///
+/// Failure semantics:
+/// - With `ignoreErrors: false` (default), the leaves are joined with `&&` so
+///   the joined command stops at the first failing leaf and returns that
+///   exit code.
+/// - With `ignoreErrors: true`, the leaves are joined with `;` (or `&` for
+///   cmd.exe) so every leaf runs regardless. The shell exit code reflects
+///   only the LAST leaf — same as bash's default scripting behaviour.
+///
+/// Compatibility:
+/// - `parallel: true` is meaningful only when there are multiple shell
+///   invocations to run; sameShell collapses to one. The parallel flag is
+///   silently ignored in this path (a warning is emitted by the runner).
+/// - `detach: true` is handled in the runner's detach branch — it joins with
+///   the same logic and spawns the joined command as a single detached
+///   process.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_same_shell_with_counter(
+	spec: &CommandSpec,
+	shell: &ResolvedShell,
+	args: &RunArgs,
+	working_dir: &Path,
+	env_files_base_dir: &Path,
+	available_private_keys: Option<&[String]>,
+	timings: bool,
+	counter: &StepCounter,
+	parent_env: Option<&HashMap<String, String>>,
+	parent_add_to_path_chain: &[Vec<String>],
+	output_prefix: Option<&str>,
+) -> Result<ExecutionResult, ExecuteError> {
+	let (setup, tailer, force_kill_guard) = ExecSetup::new(
+		spec,
+		args,
+		working_dir,
+		env_files_base_dir,
+		available_private_keys,
+		parent_env,
+		parent_add_to_path_chain,
+		output_prefix,
+	)?;
+
+	let flatten_result = collect_shell_only_leaves(
+		&spec.commands,
+		args,
+		&setup.env,
+		working_dir,
+		ShellLeafContext::SameShell,
+	);
+	let leaves = match flatten_result {
+		Ok(l) => l,
+		Err(e) => {
+			if let Some(t) = tailer {
+				t.stop();
+			}
+			return Err(e.into());
+		}
+	};
+
+	// Drop empty / whitespace-only leaves the same way the regular executor
+	// does (e.g. lines whose only content is `{{ define(...) }}`). The static
+	// counter total may have included these — `subtract_from_total` keeps the
+	// visible `(N/total)` ratio honest in either case.
+	let mut filtered: Vec<String> = Vec::with_capacity(leaves.len());
+	let mut dropped = 0usize;
+	for leaf in leaves {
+		if leaf.trim().is_empty() {
+			dropped += 1;
+		} else {
+			filtered.push(leaf);
+		}
+	}
+	if dropped > 0 {
+		counter.subtract_from_total(dropped);
+	}
+
+	if filtered.is_empty() {
+		if let Some(t) = tailer {
+			t.stop();
+		}
+		return Ok(ExecutionResult {
+			commands_run: 0,
+			failures: 0,
+			final_status: dummy_success_status(),
+		});
+	}
+
+	let ignore_errors = setup.ignore_errors;
+	let joined = join_shell_commands(&filtered, &shell.kind, ignore_errors);
+
+	// Counter accounting: sameShell collapses every leaf into ONE shell
+	// invocation. The runner's `count_target_leaves_recursive` already
+	// returns 1 for sameShell targets, so the global total is correctly
+	// sized from the entry point — but local callers (e.g. tests using
+	// `execute_command`) may have sized the counter from the raw step tree,
+	// in which case we need to roll back the `(N - 1)` extra slots so the
+	// visible ratio stays honest. `subtract_from_total` saturates, so the
+	// "already 1" case is a no-op.
+	let (step, total) = counter.next_step();
+	if filtered.len() > 1 {
+		counter.subtract_from_total(filtered.len() - 1);
+	}
+
+	if setup.logging {
+		// Log each leaf so the user sees what's queued. Step number is shared
+		// across all of them — they're a single shell process from the outside.
+		for leaf in &filtered {
+			log_command(leaf, step, total);
+		}
+	}
+
+	let shell_args = shell.exec_args(&joined);
+
+	let cmd_start = Instant::now();
+	let mut cmd = Command::new(&shell.path);
+	cmd.args(&shell_args).envs(&setup.env).current_dir(working_dir);
+
+	let status = if let Some(prefix) = setup.output_prefix.as_deref() {
+		// Inherited from a parallel ancestor: pipe stdio + line-prefix the output.
+		cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+		let mut child = cmd.spawn()?;
+		if let Some(guard) = force_kill_guard.as_ref() {
+			guard.add_child(&child);
+		}
+		let mut handles = Vec::new();
+		if let Some(out) = child.stdout.take() {
+			handles.push(spawn_line_pump(out, prefix.to_string(), OutputStream::Stdout));
+		}
+		if let Some(err) = child.stderr.take() {
+			handles.push(spawn_line_pump(err, prefix.to_string(), OutputStream::Stderr));
+		}
+		let s = child.wait()?;
+		for h in handles {
+			let _ = h.join();
+		}
+		flush_writer_thread();
+		s
+	} else if let Some(guard) = force_kill_guard.as_ref() {
+		let mut child = cmd.spawn()?;
+		guard.add_child(&child);
+		child.wait()?
+	} else {
+		cmd.status()?
+	};
+
+	if timings {
+		log_command_timing(cmd_start.elapsed());
+	}
+
+	if let Some(t) = tailer {
+		t.stop();
+	}
+
+	let failures = if status.success() { 0 } else { 1 };
+
+	Ok(ExecutionResult {
+		commands_run: 1,
+		failures,
+		final_status: status,
 	})
 }
 

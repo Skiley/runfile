@@ -392,6 +392,9 @@ fn bake_globals_into_target(
 	if spec.force_kill_on_sig_int.is_none() {
 		spec.force_kill_on_sig_int = globals.force_kill_on_sig_int;
 	}
+	if spec.same_shell.is_none() {
+		spec.same_shell = globals.same_shell;
+	}
 
 	// onlyInDirectories: prepend global before target
 	if let Some(global_dirs) = &globals.only_in_directories {

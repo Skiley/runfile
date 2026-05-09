@@ -406,8 +406,14 @@ fn validate_runfile(runfile: &mut Runfile, require_targets: bool) -> Result<(), 
 		// Validate the command steps (recursively expands if/for/when blocks).
 		validate_command_steps(&mut spec.commands, &format!("target \"{name}\""))?;
 
-		// Validate detach requires parallel when there are multiple commands
-		if spec.detach.unwrap_or(false) && !spec.parallel.unwrap_or(false) && spec.commands.len() > 1 {
+		// Validate detach requires parallel when there are multiple commands.
+		// `sameShell: true` opts out of this check because the multiple commands
+		// are joined into a single shell invocation before spawning.
+		if spec.detach.unwrap_or(false)
+			&& !spec.parallel.unwrap_or(false)
+			&& !spec.same_shell.unwrap_or(false)
+			&& spec.commands.len() > 1
+		{
 			return Err(ParseError::DetachRequiresParallel(name.clone()));
 		}
 

@@ -384,6 +384,10 @@
 					"type": "boolean",
 					"description": "When true, execute all commands in parallel instead of sequentially. All commands are spawned at the same time; the target finishes when all commands have exited."
 				},
+				"sameShell": {
+					"type": "boolean",
+					"description": "When true, all command steps run in a single shell instance instead of each step being dispatched in its own shell. Steps are joined with the shell-appropriate sequencing operator (`&&` by default, `;`/`&` with `ignoreErrors: true`) so state changes (e.g. `cd`, exported vars) persist across steps. `@target` invocations inside the body are not allowed (they have their own shell context). Combines with `detach: true` to spawn the joined command as one detached process; combines with `parallel: true` by collapsing into the single shell invocation (parallel becomes a no-op)."
+				},
 				"workingDirectory": {
 					"$ref": "#/$defs/WorkingDirectory"
 				},
@@ -466,6 +470,10 @@
 				"ignoreErrors": {
 					"type": "boolean",
 					"description": "When true, continue executing subsequent commands even if one fails."
+				},
+				"sameShell": {
+					"type": "boolean",
+					"description": "When true, all command steps in every target run in a single shell instance instead of each step being dispatched in its own shell. Can be overridden per-target."
 				},
 				"workingDirectory": {
 					"$ref": "#/$defs/WorkingDirectory"

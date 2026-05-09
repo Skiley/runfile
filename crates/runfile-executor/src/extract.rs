@@ -1,6 +1,10 @@
 use crate::args::{check_env_case_duplicates, validate_args, LoopVarGuard, RunArgs, SubstitutionError};
-use crate::control_flow::{evaluate_if_condition, expand_glob, resolve_match_branch, ControlFlowError};
+use crate::control_flow::{
+	collect_shell_only_leaves, evaluate_if_condition, expand_glob, resolve_match_branch, ControlFlowError,
+	ShellLeafContext, ShellLeafFlattenError,
+};
 use crate::env::{build_env_with_base, EnvFileError};
+use crate::executor::join_shell_commands;
 use runfile_parser::{
 	walk_spec_aux_templates, walk_step_templates, CommandStep, ForStep, Runfile, WhenStep, WORKING_DIRECTORY_DEFAULT,
 };
@@ -26,6 +30,9 @@ pub enum ExtractError {
 
 	#[error("{0}")]
 	ControlFlow(#[from] ControlFlowError),
+
+	#[error("{0}")]
+	ShellLeafFlatten(#[from] ShellLeafFlattenError),
 }
 
 /// A single extracted command line, ready to be printed.
@@ -39,6 +46,9 @@ pub struct ExtractedCommand {
 
 /// Extract all commands that would be executed for a target, including dependencies.
 /// Returns the commands in execution order, with env vars inlined.
+///
+/// Defaults the shell-kind for `sameShell` joining to [`ShellKind::Bash`]. Use
+/// [`extract_target_with_cwd`] when you need cross-shell-accurate joining.
 pub fn extract_target(
 	target_name: &str,
 	runfile: &Runfile,
@@ -56,6 +66,7 @@ pub fn extract_target(
 		&HashMap::new(),
 		&HashMap::new(),
 		None,
+		&ShellKind::Bash,
 	)
 }
 
@@ -83,6 +94,7 @@ pub fn extract_target_with_cwd<'a>(
 	source_dirs: &'a HashMap<String, PathBuf>,
 	source_files: &'a HashMap<String, PathBuf>,
 	available_private_keys: Option<&'a [String]>,
+	shell_kind: &'a ShellKind,
 ) -> Result<Vec<ExtractedCommand>, ExtractError> {
 	let all_commands = collect_all_extract_commands(target_name, runfile)?;
 	validate_args(args, &all_commands)?;
@@ -121,6 +133,7 @@ pub fn extract_target_with_cwd<'a>(
 		source_dirs,
 		source_files,
 		available_private_keys,
+		shell_kind,
 		in_progress: HashSet::new(),
 	};
 	extract_recursive(&mut ctx, target_name, args, None)
@@ -133,6 +146,10 @@ struct ExtractContext<'a> {
 	source_dirs: &'a HashMap<String, PathBuf>,
 	source_files: &'a HashMap<String, PathBuf>,
 	available_private_keys: Option<&'a [String]>,
+	/// Shell kind used to pick the correct sequencing operator (`&&` / `;` /
+	/// `&`) when joining `sameShell: true` targets into a single command line.
+	/// Doesn't affect substitution; only the join separator.
+	shell_kind: &'a ShellKind,
 	in_progress: HashSet<String>,
 }
 
@@ -253,6 +270,31 @@ fn extract_recursive_inner(
 		Vec::new()
 	};
 
+	// `sameShell: true`: take the same flatten path the runtime executor uses
+	// (`collect_shell_only_leaves`) so the dry-run output exactly matches what
+	// would actually execute — one shell invocation per target. `@target`
+	// invocations inside the body surface as `ShellLeafFlattenError` here too,
+	// matching the runtime contract.
+	if spec.same_shell.unwrap_or(false) {
+		let leaves = collect_shell_only_leaves(
+			&spec.commands,
+			args,
+			&env,
+			effective_working_dir,
+			ShellLeafContext::SameShell,
+		)?;
+		let filtered: Vec<String> = leaves.into_iter().filter(|l| !l.trim().is_empty()).collect();
+		if filtered.is_empty() {
+			return Ok(Vec::new());
+		}
+		let ignore_errors = spec.ignore_errors.unwrap_or(false);
+		let joined = join_shell_commands(&filtered, ctx.shell_kind, ignore_errors);
+		return Ok(vec![ExtractedCommand {
+			command: joined,
+			env_vars: extra_env,
+		}]);
+	}
+
 	let mut out: Vec<ExtractedCommand> = Vec::new();
 	walk_extract_steps(
 		ctx,
@@ -263,6 +305,7 @@ fn extract_recursive_inner(
 		effective_working_dir,
 		&mut out,
 	)?;
+
 	Ok(out)
 }
 

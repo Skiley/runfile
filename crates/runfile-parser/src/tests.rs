@@ -299,6 +299,7 @@ fn roundtrip_serialization() {
 			force_shell: None,
 			logging: None,
 			ignore_errors: None,
+			same_shell: None,
 			working_directory: None,
 			force_kill_on_sig_int: None,
 			only_in_directories: None,

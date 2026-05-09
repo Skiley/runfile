@@ -387,6 +387,27 @@ Wrap any commands in a `when:` block to run them only after a failure, or always
 ]
 ```
 
+#### Single-shell mode with `sameShell`
+
+By default each step runs in its own shell process, so `cd`, exported variables, and other shell state don't carry
+over between steps. Set `"sameShell": true` to join every step into a single shell invocation — state changes
+persist for free.
+
+```jsonc
+{
+  "deploy": {
+    "sameShell": true,
+    "commands": ["cd ci-scripts/", "./ci-deploy.sh"]
+  }
+}
+```
+
+Steps are joined with `&&` so the run stops at the first failure (or `;` / `&` when `ignoreErrors: true`). `if`,
+`for`, and `match` blocks are evaluated by Runfile and their chosen branches flow into the same joined invocation.
+`@target` calls inside the body are rejected — they have their own shell context and can't share state with the
+parent. `sameShell` also composes with `detach: true` (joined command spawns as one detached process) and is
+available on `globals` for project-wide defaults.
+
 #### Watch mode, built in
 
 Add a `watch` array to any target. No flags, no extra tooling.

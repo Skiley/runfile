@@ -326,6 +326,7 @@ pub fn cmd_dry_run(target_name: &str, extra_args: &[String], file: Option<&std::
 		&rt.source_dirs,
 		&rt.source_files,
 		pk_slice,
+		&rt.shell.kind,
 	) {
 		Ok(commands) => {
 			let lines = format_extracted_commands(&commands, &rt.shell.kind);

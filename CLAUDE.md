@@ -596,11 +596,11 @@ crates/
 Top-level: `$schema` (required), `targets` (required), `globals` (optional)
 
 Target properties: `commands` (required), `description`, `aliases`, `env`, `envFiles`, `forceShell`, `addToPath`,
-`logging`, `ignoreErrors`, `parallel`, `detach`, `workingDirectory`, `confirm`, `forceKillOnSigInt`, `extendStdio`,
-`watch`, `onlyInDirectories`, `metadata`
+`logging`, `ignoreErrors`, `parallel`, `detach`, `sameShell`, `workingDirectory`, `confirm`, `forceKillOnSigInt`,
+`extendStdio`, `watch`, `onlyInDirectories`, `metadata`
 
-Global properties: `addToPath`, `env`, `envFiles`, `forceShell`, `logging`, `ignoreErrors`, `forceKillOnSigInt`,
-`workingDirectory`, `onlyInDirectories`, `metadata`
+Global properties: `addToPath`, `env`, `envFiles`, `forceShell`, `logging`, `ignoreErrors`, `sameShell`,
+`forceKillOnSigInt`, `workingDirectory`, `onlyInDirectories`, `metadata`
 
 Each entry of a `commands` array is a [`CommandStep`]: a raw shell command string, a target invocation
 (`"@target [args...]"` string), a `WhenStep` (`{ when, commands, [ignoreErrors] }`), an `IfStep`, a
@@ -680,8 +680,24 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   so a `dev` target that fans out via `for in: "namespaces"` + `@{{ VARS.ns }}:dev` gets every nested shell tagged
   with its parallel branch identity. Set `RUNFILE_NO_LINE_PREFIX=1`/`true` to disable prefixing and inherit raw
   stdio. The target finishes when all commands exit. With `ignoreErrors`, failures are counted but exit is 0.
-- `detach` requires `parallel: true`. When both are set, commands are spawned in parallel as detached background
-  processes and the CLI exits immediately.
+- `detach` requires `parallel: true` (or `sameShell: true`) when there are multiple commands. With `parallel`,
+  commands are spawned in parallel as detached background processes and the CLI exits immediately. With
+  `sameShell`, the joined command spawns as one detached process. Without either, the parser rejects multi-command
+  detach targets (`ParseError::DetachRequiresParallel`).
+- `sameShell` collapses every step into a SINGLE shell invocation. The runtime path is
+  [`execute_same_shell_with_counter`] in `runfile-executor`: walk the commands tree via
+  [`collect_shell_only_leaves`] (which expands `if`/`for`/`match`/`when` into a flat string list, evaluating
+  conditions / iterations against the live substitution context exactly like the regular executor; rejects
+  `@target` invocations because they need their own shell context); drop empty-after-substitution leaves and
+  bump `subtract_from_total` so the `(N/total)` ratio stays honest; join the remaining leaves with
+  [`join_shell_commands`] (`&&` for stop-on-failure, `;` for `ignoreErrors: true`, `&` for cmd.exe ignoreErrors);
+  spawn one shell. The runner's `count_target_leaves_recursive` short-circuits to `1` for sameShell targets so
+  the global counter is sized correctly from the entry point. `parallel: true` collapses into the single
+  invocation (warning printed). `detach: true` joins via the same logic and spawns the joined command via
+  `execute_detached`. Inner-block `ignoreErrors` flags are NOT honored — the only knob is the target-level
+  `ignoreErrors`, which controls the join separator. Dry-run extract follows the same flatten path
+  (`extract_recursive_inner` returns one `ExtractedCommand` per sameShell target with `command` set to the joined
+  string) so `--dry-run` output matches what really runs.
 - Logging goes to stderr so it doesn't interfere with command stdout.
 - Conditional configuration uses `{{ RUN.* }}` substitution in scalar fields (env values,
   `forceShell`, `workingDirectory`, etc.) plus `if`/`when`/`@target` composition. The most common pattern
