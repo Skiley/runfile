@@ -1,35 +1,27 @@
-use crate::ci_detect;
-use std::io::IsTerminal;
-
 /// Env vars checked for agent detection, with their expected "active" values.
 const AGENT_ENV_VARS: &[(&str, &str)] = &[("CLAUDECODE", "1"), ("LLM_INVOCATION", "true"), ("AGENT_MODE", "1")];
 
-/// Pure logic: returns `true` if any env var signals an agent, or stdin is not a terminal
-/// (unless a CI environment is detected, in which case the stdin heuristic is suppressed).
+/// Pure logic: returns `true` if any env var signals an agent invocation.
 ///
 /// Extracted so the detection rules can be fully tested without touching process-global state.
-fn detect(env_lookup: impl Fn(&str) -> Option<String>, stdin_is_terminal: bool) -> bool {
+fn detect(env_lookup: impl Fn(&str) -> Option<String>) -> bool {
 	for &(var, expected) in AGENT_ENV_VARS {
 		if env_lookup(var).as_deref() == Some(expected) {
 			return true;
 		}
 	}
-	if !stdin_is_terminal && !ci_detect::is_ci_with(&env_lookup) {
-		return true;
-	}
 	false
 }
 
 /// Returns `true` if the current process appears to have been invoked by an LLM agent
-/// rather than a human user at an interactive terminal.
+/// rather than a human user.
 ///
 /// Detection heuristics (any match → agent):
 /// - `CLAUDECODE=1`
 /// - `LLM_INVOCATION=true`
 /// - `AGENT_MODE=1`
-/// - stdin is not a terminal (piped/redirected) **and** no CI env var is set
 pub fn is_agent_invocation() -> bool {
-	detect(|name| std::env::var(name).ok(), std::io::stdin().is_terminal())
+	detect(|name| std::env::var(name).ok())
 }
 
 /// If an agent invocation is detected, print an error and exit.
@@ -60,59 +52,47 @@ mod tests {
 	// ── No signals at all ────────────────────────────────────────
 
 	#[test]
-	fn no_env_vars_interactive_terminal_is_not_agent() {
-		assert!(!detect(env_from(&[]), true));
+	fn no_env_vars_is_not_agent() {
+		assert!(!detect(env_from(&[])));
 	}
 
 	// ── Each env var independently triggers detection ────────────
 
 	#[test]
 	fn claudecode_1_is_agent() {
-		assert!(detect(env_from(&[("CLAUDECODE", "1")]), true));
+		assert!(detect(env_from(&[("CLAUDECODE", "1")])));
 	}
 
 	#[test]
 	fn llm_invocation_true_is_agent() {
-		assert!(detect(env_from(&[("LLM_INVOCATION", "true")]), true));
+		assert!(detect(env_from(&[("LLM_INVOCATION", "true")])));
 	}
 
 	#[test]
 	fn agent_mode_1_is_agent() {
-		assert!(detect(env_from(&[("AGENT_MODE", "1")]), true));
+		assert!(detect(env_from(&[("AGENT_MODE", "1")])));
 	}
 
 	// ── Wrong values do NOT trigger ─────────────────────────────
 
 	#[test]
 	fn claudecode_0_is_not_agent() {
-		assert!(!detect(env_from(&[("CLAUDECODE", "0")]), true));
+		assert!(!detect(env_from(&[("CLAUDECODE", "0")])));
 	}
 
 	#[test]
 	fn llm_invocation_false_is_not_agent() {
-		assert!(!detect(env_from(&[("LLM_INVOCATION", "false")]), true));
+		assert!(!detect(env_from(&[("LLM_INVOCATION", "false")])));
 	}
 
 	#[test]
 	fn agent_mode_0_is_not_agent() {
-		assert!(!detect(env_from(&[("AGENT_MODE", "0")]), true));
+		assert!(!detect(env_from(&[("AGENT_MODE", "0")])));
 	}
 
 	#[test]
 	fn claudecode_empty_is_not_agent() {
-		assert!(!detect(env_from(&[("CLAUDECODE", "")]), true));
-	}
-
-	// ── Non-interactive stdin triggers detection ─────────────────
-
-	#[test]
-	fn piped_stdin_is_agent() {
-		assert!(detect(env_from(&[]), false));
-	}
-
-	#[test]
-	fn piped_stdin_with_no_env_vars_is_agent() {
-		assert!(detect(env_from(&[("UNRELATED", "value")]), false));
+		assert!(!detect(env_from(&[("CLAUDECODE", "")])));
 	}
 
 	// ── Combinations ────────────────────────────────────────────
@@ -120,63 +100,17 @@ mod tests {
 	#[test]
 	fn multiple_env_vars_still_agent() {
 		let env = &[("CLAUDECODE", "1"), ("AGENT_MODE", "1")];
-		assert!(detect(env_from(env), true));
+		assert!(detect(env_from(env)));
 	}
 
 	#[test]
-	fn env_var_plus_piped_stdin_still_agent() {
-		assert!(detect(env_from(&[("CLAUDECODE", "1")]), false));
-	}
-
-	#[test]
-	fn wrong_values_with_interactive_terminal_is_not_agent() {
+	fn wrong_values_is_not_agent() {
 		let env = &[("CLAUDECODE", "yes"), ("LLM_INVOCATION", "1"), ("AGENT_MODE", "true")];
-		assert!(!detect(env_from(env), true));
-	}
-
-	// ── CI environments suppress the stdin-not-a-terminal heuristic ─────
-
-	#[test]
-	fn ci_with_piped_stdin_is_not_agent() {
-		assert!(!detect(env_from(&[("CI", "true")]), false));
+		assert!(!detect(env_from(env)));
 	}
 
 	#[test]
-	fn github_actions_with_piped_stdin_is_not_agent() {
-		assert!(!detect(env_from(&[("GITHUB_ACTIONS", "true")]), false));
-	}
-
-	#[test]
-	fn gitlab_ci_with_piped_stdin_is_not_agent() {
-		assert!(!detect(env_from(&[("GITLAB_CI", "true")]), false));
-	}
-
-	#[test]
-	fn jenkins_with_piped_stdin_is_not_agent() {
-		assert!(!detect(env_from(&[("JENKINS_URL", "http://jenkins.example/")]), false));
-	}
-
-	#[test]
-	fn ci_value_1_with_piped_stdin_is_not_agent() {
-		assert!(!detect(env_from(&[("CI", "1")]), false));
-	}
-
-	#[test]
-	fn empty_ci_var_does_not_suppress() {
-		// An empty CI var is treated as not-set; piped stdin still triggers detection.
-		assert!(detect(env_from(&[("CI", "")]), false));
-	}
-
-	#[test]
-	fn ci_does_not_override_explicit_agent_env_var() {
-		// Even in CI, an explicit agent signal still triggers — agent guard is non-negotiable.
-		let env = &[("CI", "true"), ("CLAUDECODE", "1")];
-		assert!(detect(env_from(env), false));
-	}
-
-	#[test]
-	fn ci_with_interactive_terminal_is_not_agent() {
-		// Sanity: CI + terminal is obviously not an agent.
-		assert!(!detect(env_from(&[("CI", "true")]), true));
+	fn unrelated_env_vars_is_not_agent() {
+		assert!(!detect(env_from(&[("UNRELATED", "value"), ("CI", "true")])));
 	}
 }

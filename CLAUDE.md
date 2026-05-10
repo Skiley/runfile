@@ -658,16 +658,16 @@ crates/
   walker and `@target` resolver are always engaged.
 - LLM-agent guard (`agent_detect.rs`): `refuse_if_agent(action_description)` aborts with an error if it detects an
   agent invocation. Detection signals (any one triggers): env vars `CLAUDECODE=1`, `LLM_INVOCATION=true`, or
-  `AGENT_MODE=1`, or stdin not being a terminal **unless** a CI environment is detected. CI detection lives in
-  `ci_detect.rs` (extracted so the same logic gates other CI-only paths) — `is_ci_with(env_lookup)` is the testable
-  pure form, `is_ci()` reads `std::env`. The list of CI vars: any non-empty value in `CI`, `GITHUB_ACTIONS`,
-  `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `BUILDKITE`, `JENKINS_URL`, `TF_BUILD`, `TEAMCITY_VERSION`,
-  `BITBUCKET_BUILD_NUMBER`. CI suppresses **only** the stdin heuristic in agent detection, so explicit agent env
-  vars still trigger regardless. `refuse_if_agent` is applied to commands that emit decrypted secrets or otherwise
-  resolved env values: `:env get`, `:env decrypt`, `:env secret-keys list`, `:env secret-keys get-private`,
-  and `--dry-run` (`format_extracted_commands` inlines resolved env vars — including decrypted secrets — into the
-  printed shell-ready commands). When adding a new command that prints resolved env values, decrypted secrets,
-  or private keys, gate it with `refuse_if_agent` too.
+  `AGENT_MODE=1`. Detection is env-var-only — there is no stdin/terminal heuristic, so piped input from humans
+  (e.g. `echo secret | run :env set ...`) is not treated as an agent. CI detection lives in `ci_detect.rs`
+  (used by `:env secret-keys add --key` to gate non-interactive key entry; `is_ci_with(env_lookup)` is the
+  testable pure form, `is_ci()` reads `std::env`). The list of CI vars: any non-empty value in `CI`,
+  `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `BUILDKITE`, `JENKINS_URL`, `TF_BUILD`,
+  `TEAMCITY_VERSION`, `BITBUCKET_BUILD_NUMBER`. `refuse_if_agent` is applied to commands that emit decrypted
+  secrets or otherwise resolved env values: `:env get`, `:env decrypt`, `:env secret-keys list`,
+  `:env secret-keys get-private`, and `--dry-run` (`format_extracted_commands` inlines resolved env vars —
+  including decrypted secrets — into the printed shell-ready commands). When adding a new command that prints
+  resolved env values, decrypted secrets, or private keys, gate it with `refuse_if_agent` too.
 - `:env secret-keys add --key <hex>` is the non-interactive path used by CI (e.g. the
   `.github/actions/setup` action's `secret-keys` input). Gated by `ci_detect::is_ci()` — refuses to run on dev
   machines so the private key doesn't end up in shell history. Validates the key is 64-char hex, derives the
