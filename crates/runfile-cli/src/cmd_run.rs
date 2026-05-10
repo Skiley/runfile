@@ -11,7 +11,6 @@ use std::process;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::agent_detect;
 use crate::runfile_helpers::{local_dir_from_merge, local_file_from_merge, resolve_and_merge};
 use crate::shell::resolve_shell_for_runfile;
 
@@ -303,8 +302,6 @@ pub fn cmd_run(
 }
 
 pub fn cmd_dry_run(target_name: &str, extra_args: &[String], file: Option<&std::path::Path>, stdin_args: bool) {
-	agent_detect::refuse_if_agent("dry-run a target");
-
 	let rt = resolve_target_setup(target_name, extra_args, file, stdin_args);
 
 	let private_keys = keyring_keys::all_private_keys();

@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 
-mod agent_detect;
 mod ci_detect;
 mod cmd_config;
 mod cmd_env;

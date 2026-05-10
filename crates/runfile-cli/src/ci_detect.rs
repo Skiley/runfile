@@ -1,7 +1,6 @@
 //! CI environment detection.
 //!
-//! Shared by `agent_detect` (to suppress the stdin-not-a-terminal heuristic when running
-//! in CI) and by commands like `:env secret-keys add --key` that are only safe to use
+//! Used by commands like `:env secret-keys add --key` that are only safe to use
 //! non-interactively from automation.
 
 /// Env vars whose presence indicates a CI environment (any non-empty value counts).

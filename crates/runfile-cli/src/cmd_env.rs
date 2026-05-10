@@ -1,4 +1,4 @@
-use crate::{agent_detect, ci_detect};
+use crate::ci_detect;
 use runfile_settings::keyring_keys;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
@@ -230,8 +230,6 @@ pub fn cmd_secret_keys_add(key_arg: Option<&str>) {
 
 /// List all stored keys showing public key fingerprints.
 pub fn cmd_secret_keys_list() {
-	agent_detect::refuse_if_agent("list secret keys");
-
 	let fingerprints = match keyring_keys::list_fingerprints() {
 		Ok(fps) => fps,
 		Err(e) => {
@@ -278,8 +276,6 @@ pub fn cmd_secret_keys_remove(public_prefix: &str) {
 /// Print the full private key for sharing with teammates.
 /// Takes a public key prefix to identify which key to print.
 pub fn cmd_get_private_key(public_prefix: &str) {
-	agent_detect::refuse_if_agent("print private key");
-
 	let all_keys = keyring_keys::all_private_keys();
 	let matched = match runfile_crypto::find_private_key_by_public_prefix(public_prefix, &all_keys) {
 		Ok(k) => k,
@@ -306,8 +302,6 @@ pub fn cmd_get_private_key(public_prefix: &str) {
 
 /// Read a variable from an env file. Auto-detects encryption and decrypts if needed.
 pub fn cmd_get(file: &str, var: &str) {
-	agent_detect::refuse_if_agent("read env variable");
-
 	let (pairs, _) = read_env_file(file);
 	let env_map: HashMap<String, String> = pairs.iter().cloned().collect();
 
@@ -413,8 +407,6 @@ pub fn cmd_set(file: &str, var: &str, value: Option<&str>, plain: bool) {
 
 /// Decrypt an encrypted env file. Writes to `output` if provided, otherwise prints to stdout.
 pub fn cmd_decrypt_file(source: &str, output: Option<&str>) {
-	agent_detect::refuse_if_agent("decrypt env file");
-
 	let (pairs, _) = read_env_file(source);
 	let env_map: HashMap<String, String> = pairs.iter().cloned().collect();
 
