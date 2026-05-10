@@ -756,7 +756,16 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   `@target` bodies that read `{{ VARS.x }}` as a loop variable can race). `parallel: true` on a `for` block runs
   iterations concurrently, but **outer parallel only**: a nested `for parallel: true` inside an already-parallel
   context is forced sequential (with a warning).
-- `ignoreErrors` makes the CLI exit 0 even when commands fail — this is the specified behavior, not a bug.
+- `ignoreErrors` makes the CLI exit 0 even when commands fail — this is the specified behavior, not a bug. **It
+  also contains failures across `@target` boundaries**: when a target with `ignoreErrors: true` is invoked from a
+  parent via `@target`, the dep self-reports as success to the caller (`failures: 0`, `final_status: success`),
+  symmetric with how block-level `ignoreErrors` on `for`/`if`/`when`/`match` already swallows local failures.
+  Without this, the dep's internal failure count would surface to the caller's `state.failures`, flip the
+  caller's `failed` flag, and skip every subsequent default-`when: success` sibling. The containment lives in
+  `RunnerDependencyResolver::run_dependency` (`runner.rs`) — looking up `spec.ignore_errors` on the called
+  target after `run_target_inner` returns. Direct CLI invocation goes through `run_target_with_cwd` (not
+  `run_dependency`) so a top-level `run _target_with_ignoreerrors` still sees the raw `ExecutionResult` from
+  `execute_command_with_counter` (failure count + `final_status` reflecting the last command's actual exit).
 - `parallel` spawns all shell commands simultaneously; their stdout/stderr is piped through line-buffered reader
   threads that prefix every line with `[N]` (the global step number) and strip non-SGR ANSI cursor-control
   escapes — so progress-bar redraws (`docker compose pull`, etc.) become append-only chronological lines instead

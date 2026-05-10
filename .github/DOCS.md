@@ -1769,6 +1769,10 @@ When `ignoreErrors` is `true`:
 
 - All commands run regardless of individual failures.
 - The CLI exits with code 0 even if some commands failed.
+- Failures are **contained across `@target` boundaries**: when this target is invoked from a parent via
+  `@target`, the dep self-reports as success to the caller. The parent's subsequent default-`when: success`
+  steps keep running. This mirrors how `for`/`if`/`when`/`match` blocks with `ignoreErrors: true` already
+  swallow local failures.
 
 Set it globally if you want this behavior for all targets, and override per-target where strictness matters.
 

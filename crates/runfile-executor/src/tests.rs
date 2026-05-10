@@ -802,6 +802,61 @@ fn execute_ignore_errors_command_overrides_global() {
 	assert_eq!(result.failures, 1);
 }
 
+#[test]
+fn dep_ignore_errors_does_not_abort_parent() {
+	// Regression: a target with `ignoreErrors: true` invoked via `@target`
+	// from a parent that does NOT have `ignoreErrors` should fully contain
+	// its failures. Previously the dep's `failures` count was folded into the
+	// parent's `state.failures`, which flipped the parent's `failed` flag and
+	// caused subsequent default-`when: success` siblings to be skipped.
+	// Symmetric with how `for ... ignoreErrors: true` already works.
+	use crate::runner::run_target;
+	use runfile_parser::parse_runfile;
+
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+
+	let marker = dir.path().join("after_dep");
+	let marker_escaped = json_escape_path(&marker);
+	let create_marker = if shell.kind == ShellKind::Cmd {
+		format!("echo done > \\\"{marker_escaped}\\\"")
+	} else {
+		format!("touch \\\"{marker_escaped}\\\"")
+	};
+	let fail_cmd = if shell.kind == ShellKind::Cmd {
+		"exit /b 1"
+	} else {
+		"exit 1"
+	};
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "targets": {{
+            "_dep": {{ "commands": ["{fail_cmd}", "{fail_cmd}"], "ignoreErrors": true }},
+            "parent": {{ "commands": ["@_dep", "{create_marker}"] }}
+        }}
+    }}"#
+	);
+
+	let runfile = parse_runfile(&json).unwrap();
+	let args = RunArgs::default();
+
+	let result = run_target("parent", &runfile, &shell, &args, dir.path()).unwrap();
+	assert!(
+		marker.exists(),
+		"Sibling step after `@_dep` (which had ignoreErrors: true) should have run"
+	);
+	assert!(
+		result.final_status.success(),
+		"parent should report success because the dep's failures were contained"
+	);
+	assert_eq!(
+		result.failures, 0,
+		"dep's failures should not surface to the caller's failure count"
+	);
+}
+
 // ── Command-level addToPath tests ──────────────────────────────────
 
 #[test]

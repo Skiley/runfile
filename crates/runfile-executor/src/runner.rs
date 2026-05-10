@@ -142,7 +142,33 @@ impl DependencyResolver for RunnerDependencyResolver<'_> {
 			output_prefix,
 			&mut chain,
 		) {
-			Ok(result) => Ok(result),
+			Ok(result) => {
+				// Target-level `ignoreErrors: true` self-contains its failures
+				// — symmetric with how block-level `ignoreErrors` works in
+				// `for`/`if`/`when`/`match` (see executor.rs handling that
+				// returns Ok with no fold-in). Without this, a dep's internal
+				// failure count would still surface to the caller's
+				// `state.failures`, flip the caller's `failed` flag, and skip
+				// every subsequent default-`when: success` sibling. The dep's
+				// `ignoreErrors` is meant to opt the dep out of the failure
+				// chain entirely, so we present a clean result here.
+				let dep_ignores_errors = self
+					.root
+					.runfile
+					.targets
+					.get(target_name)
+					.and_then(|spec| spec.ignore_errors)
+					.unwrap_or(false);
+				if dep_ignores_errors {
+					Ok(ExecutionResult {
+						commands_run: result.commands_run,
+						failures: 0,
+						final_status: dummy_success_status(),
+					})
+				} else {
+					Ok(result)
+				}
+			}
 			Err(RunError::Execute(e)) => Err(e),
 			Err(e) => Err(ExecuteError::DependencyFailed(target_name.to_string(), e.to_string())),
 		}
