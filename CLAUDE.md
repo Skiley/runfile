@@ -867,10 +867,15 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   flags), `get` (auto-decrypts), `set` (auto-encrypts, `--plain` to skip encryption; `value` arg is optional — when
   omitted, reads from stdin until EOF and strips a single trailing `\n`/`\r\n`, so secrets stay out of shell history
   and shell-special characters like `$`/`!` need no escaping), `decrypt` (file→file), `encrypt` (
-  file→file with public key prefix match), and `inject` (run a command with env vars from one or more `.env` files
-  injected, à la `dotenvx run` — `-f <file>` repeatable, defaults to `.env`, encrypted values auto-decrypted in
-  memory, command runs after `--`, `RUNFILE_ENCRYPTION_PUBLIC_KEY` is stripped before injection, the child's exit
-  code is propagated). **Parent process env always wins**: after files are merged and decrypted, any key already
+  file→file with public key prefix match), `rotate <file> [--delete-current-key]` (generate a new private key,
+  decrypt every encrypted value with the old key, re-encrypt with the new key, rewrite the file with the new
+  `RUNFILE_ENCRYPTION_PUBLIC_KEY` header — plaintext lines / comments preserved verbatim; the new key is added
+  to the OS credential store; the old key stays in place by default so other files encrypted with it keep
+  working, and `--delete-current-key` removes it after rewriting — only safe once every file using the old key
+  has been rotated, otherwise those files become permanently undecryptable), and `inject` (run a command with
+  env vars from one or more `.env` files injected, à la `dotenvx run` — `-f <file>` repeatable, defaults to
+  `.env`, encrypted values auto-decrypted in memory, command runs after `--`, `RUNFILE_ENCRYPTION_PUBLIC_KEY` is
+  stripped before injection, the child's exit code is propagated). **Parent process env always wins**: after files are merged and decrypted, any key already
   defined in the parent process is dropped from the file-loaded map (`std::env::var_os` for platform-correct case
   sensitivity), so the inherited value reaches the child unmodified — file-loaded values only fill in gaps. The
   program is resolved via `which::which_in` against the *effective* PATH the child will see (inherited PATH if
@@ -887,7 +892,9 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   `cmd_run.rs` (CLI layer). Events are debounced at 300ms. Patterns are relative to the Runfile directory; `!` prefix
   excludes.
 - Confirmation prompts (`confirm` field) block on stdin before executing. Auto-skipped when `CI` env var is `"true"` or
-  `"1"`, or when `--yes`/`-y` flag is passed. The `confirm` string supports `{{ ... }}` substitution.
+  `"1"`, or when `--yes`/`-y` flag is passed. The `confirm` string is printed verbatim — `{{ ... }}` substitution is
+  NOT applied at the prompt site (see `runner.rs`). The string IS visited by `walk_spec_aux_templates` so static
+  arg-usage validation picks up `{{ ARGS.x }}` references inside it, but the runtime prompt shows the raw template.
 - `extendStdio` is an optional array of `{ "fromFile": "path", "stream": "stdout"|"stderr" }` objects on `CommandSpec`.
   During execution, background threads tail each log file and route new complete lines (terminated by `\n`) to the
   specified stream. Files that don't exist yet are polled until they appear. Polling interval is 50ms.

@@ -17,7 +17,7 @@ $ run dev --port=4000
     "dev": {
       "description": "Starts the dev server",
       "commands": "vite",
-      "env": { "PORT": "{{ ARGS.port ? 3000 }}" }
+      "env": { "PORT": "{{ ARGS.port ? '3000' }}" }
     },
     "build": {
       "description": "Type-checks and builds in parallel",
@@ -29,7 +29,7 @@ $ run dev --port=4000
           "then": "wsl --shell-type login -- vite build"
         }
       ],
-      "envFiles": [".env", ".env.{{ ARGS.env ? development }}"],
+      "envFiles": [".env", ".env.{{ ARGS.env ? 'development' }}"],
       "parallel": true
     },
     "type-check": {
@@ -60,7 +60,7 @@ curl -fsSL https://github.com/Skiley/runfile/releases/latest/download/install.sh
 
 Windows (via PowerShell):
 
-```bash
+```powershell
 iwr https://github.com/Skiley/runfile/releases/latest/download/install.ps1 | iex
 ```
 

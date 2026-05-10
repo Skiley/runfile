@@ -133,7 +133,7 @@
 			"properties": {
 				"if": {
 					"type": "string",
-					"description": "Boolean expression. Supports comparisons (==, !=), logical operators (&&, ||, !), parentheses, and substitutions ({{ ARGS.x }}, {{ ENV.X }}, {{ FLAGS.x }}, {{ VARS.x }}, {{ RUN.os }}, {{ RUN.arch }}, {{ RUN.shell }}). Mixing && and || requires parentheses. Truthiness: only the empty string is falsy."
+					"description": "Substitution template that selects the branch. Resolved through the regular {{ ... }} pipeline at runtime; the resolved value MUST be exactly \"true\" (run `then`), \"false\" or \"\" (run `else`, or skip if no `else`). Anything else is a hard error. The boolean DSL — comparisons (==, !=), logical operators (&&, ||, !), parens — lives INSIDE the {{ ... }} block (e.g. `{{ ARGS.env == 'production' && FLAGS.confirm }}`); operators outside {{ }} are NOT supported. Inside the DSL, FLAGS.x works as a bare boolean (resolves to \"true\"/\"false\"); ARGS.x / ENV.x / VARS.x must equal \"true\" / \"false\" / \"\" to be used as bare booleans, otherwise use a comparison. Mixing && and || requires parens. Errors surface at runtime, not at parse time."
 				},
 				"then": {
 					"description": "Steps executed when the condition is truthy. May be a single shell-command string (sugar for a one-element array) or an array of command steps.",
@@ -257,7 +257,7 @@
 		},
 		"MatchStep": {
 			"type": "object",
-			"description": "Multi-way dispatch on a substituted value. Resolves the `match` template through the normal substitution pipeline ({{ ARGS.x }}, {{ ENV.X }}, {{ VARS.x }}, {{ RUN.* }}, chained fallbacks like {{ ARGS.x ? ENV.X ? default }}, etc.), then runs the matching branch by string equality against the `cases` keys. When no case matches and no `default` is set, execution errors out and lists the valid cases.",
+			"description": "Multi-way dispatch on a substituted value. Resolves the `match` template through the normal substitution pipeline ({{ ARGS.x }}, {{ ENV.X }}, {{ VARS.x }}, {{ RUN.* }}, chained fallbacks like {{ ARGS.x ? ENV.X ? 'default' }}, etc.), then runs the matching branch by string equality against the `cases` keys. Case keys wrapped in `/.../` are treated as regex patterns and tried after exact-equality lookup fails (literal cases always win over a regex that would also match). The regex isn't anchored — wrap with `/^...$/` for a full-string match. When no case matches and no `default` is set, execution errors out and lists the valid cases.",
 			"required": [
 				"match",
 				"cases"
@@ -270,7 +270,7 @@
 				},
 				"cases": {
 					"type": "object",
-					"description": "Map from case value (compared as a string against the resolved match value) to the steps to run. Each value is either a single shell-command string (sugar for a one-element array) or an array of command steps.",
+					"description": "Map from case value to the steps to run. Keys are matched by exact string equality against the resolved match value; keys wrapped in `/.../` are interpreted as regex patterns and tried only when no literal case matches (literal cases always win over a regex that would also match — the regex isn't anchored, use `/^...$/` for full-string match). Each value is either a single shell-command string (sugar for a one-element array) or an array of command steps.",
 					"additionalProperties": {
 						"oneOf": [
 							{
@@ -453,15 +453,7 @@
 				},
 				"forceShell": {
 					"type": "string",
-					"description": "Force all targets to use a specific shell. Can be overridden per-target.",
-					"enum": [
-						"bash",
-						"zsh",
-						"sh",
-						"fish",
-						"powershell",
-						"cmd"
-					]
+					"description": "Force all targets to use a specific shell. Accepts a shell name (bash/zsh/sh/fish/powershell/cmd), an absolute path, or a {{ ... }} substitution that resolves to one of those at runtime. Can be overridden per-target."
 				},
 				"logging": {
 					"type": "boolean",
