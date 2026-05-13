@@ -6852,6 +6852,38 @@ mod stdin_args {
 	}
 
 	#[test]
+	fn missing_positional_args_prompts_for_bare_args() {
+		// Bare `{{ ARGS }}` with no positional args should prompt under
+		// --stdin-args (the bump-target use case: `"match": "{{ ARGS }}"`).
+		let prompter = Arc::new(MockPrompter::default().with_value("ARGS", Some("major")));
+		let args = args_with(prompter.clone());
+		let result = args.substitute("part={{ ARGS }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "part=major");
+		let calls = prompter.value_calls.lock().unwrap();
+		assert_eq!(calls.len(), 1);
+		assert_eq!(calls[0], ("ARGS".to_string(), None));
+	}
+
+	#[test]
+	fn missing_positional_args_empty_answer_falls_back_to_empty() {
+		// Empty answer (user pressed Enter): `{{ ARGS }}` resolves to "",
+		// matching prior behavior.
+		let prompter = Arc::new(MockPrompter::default().with_value("ARGS", None));
+		let args = args_with(prompter);
+		let result = args.substitute("part={{ ARGS }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "part=");
+	}
+
+	#[test]
+	fn provided_positional_args_skip_bare_args_prompt() {
+		let prompter = Arc::new(MockPrompter::default());
+		let args = RunArgs::parse(&["minor".into()]).with_stdin_prompter(Some(prompter.clone()));
+		let result = args.substitute("part={{ ARGS }}", &HashMap::new()).unwrap();
+		assert_eq!(result, "part=minor");
+		assert!(prompter.value_calls.lock().unwrap().is_empty());
+	}
+
+	#[test]
 	fn missing_env_prompts_and_uses_answer() {
 		let prompter = Arc::new(MockPrompter::default().with_value("ENV.SECRET", Some("hush")));
 		let args = args_with(prompter);
