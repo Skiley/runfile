@@ -39,7 +39,7 @@
 			"commands": [
 				"{{ define(part, one_of(ARGS, 'major', 'minor', 'patch')) }}",
 				"{{ define(cargo, read_file('Cargo.toml')) }}",
-				"{{ define(cur, regex_capture(VARS.cargo, 'version = \"([^\"]+)\"', '1')) }}",
+				"{{ define(cur, regex_capture(VARS.cargo, '(?m)^version = \"([^\"]+)\"', '1')) }}",
 				{
 					"match": "{{ VARS.part }}",
 					"cases": {
@@ -48,7 +48,7 @@
 						"patch": "{{ define(new, concat(nth(VARS.cur, '.', '0'), '.', nth(VARS.cur, '.', '1'), '.', add(nth(VARS.cur, '.', '2'), '1'))) }}"
 					}
 				},
-				"{{ define(updated, replace_all(VARS.cargo, concat('version = \"', VARS.cur, '\"'), concat('version = \"', VARS.new, '\"'))) }}",
+				"{{ define(updated, regex_replace(VARS.cargo, '(?m)^version = \"[^\"]+\"', concat('version = \"', VARS.new, '\"'))) }}",
 				"{{ write_file('Cargo.toml', VARS.updated) }}",
 				"cargo update --workspace",
 				"echo 'Bumped: version {{ VARS.cur }} -> {{ VARS.new }}'",
