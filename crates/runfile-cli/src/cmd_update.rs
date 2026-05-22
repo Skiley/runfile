@@ -79,10 +79,11 @@ pub fn cmd_update(version: Option<&str>) {
 
 	match status {
 		Ok(s) if s.success() => {
-			// On Windows the old binary was renamed to `<exe>.old` because it's
-			// the running process and can't be overwritten. It's still locked
-			// now (we're executing from it), so the soonest it can go away is
-			// the next reboot — schedule that. Best-effort; see the fn doc.
+			// On Windows the old binary was renamed aside to `<exe>.old-<guid>`
+			// because it's the running process and can't be overwritten. It's
+			// still locked now (we're executing from it), so the soonest it can
+			// go away is the next reboot — schedule that. Best-effort; see the
+			// fn doc.
 			#[cfg(windows)]
 			schedule_old_deletion_at_reboot(&exe);
 		}
@@ -97,39 +98,57 @@ pub fn cmd_update(version: Option<&str>) {
 	}
 }
 
-/// Schedule `<exe>.old` (the previous binary, renamed aside by `install.ps1`
-/// because it's the running process) for deletion at the next reboot via
-/// `MoveFileExW(.., NULL, MOVEFILE_DELAY_UNTIL_REBOOT)`.
+/// Schedule every `<exe>.old-<guid>` aside-file (a previous binary renamed
+/// aside by `install.ps1` because it was the running process) for deletion at
+/// the next reboot via `MoveFileExW(.., NULL, MOVEFILE_DELAY_UNTIL_REBOOT)`.
+///
+/// `install.ps1` renames the running binary to a GUID-suffixed name so the
+/// rename can never collide with a still-locked leftover, which means there
+/// can be more than one aside-file present — we scan the install dir and
+/// schedule each.
 ///
 /// The flag records the path in the registry for the Session Manager to delete
 /// at boot, so it doesn't matter that the file is currently locked. Best-effort
 /// only: the underlying registry write requires administrator rights, so on the
-/// common per-user install this silently no-ops — `install.ps1` deletes any
-/// stale `.old` at the start of the next update regardless, so nothing is
-/// orphaned permanently in practice.
+/// common per-user install this silently no-ops — `install.ps1` sweeps any
+/// stale aside-files on the next update regardless, so nothing is orphaned
+/// permanently in practice.
 #[cfg(windows)]
 fn schedule_old_deletion_at_reboot(exe: &Path) {
 	use std::os::windows::ffi::OsStrExt;
 	use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
 
-	let mut old = exe.as_os_str().to_owned();
-	old.push(".old");
-
-	// Nothing to schedule if the rename didn't happen (e.g. there was no prior
-	// binary). Avoids registering a bogus pending-delete for a missing path.
-	if !Path::new(&old).exists() {
+	let (Some(dir), Some(name)) = (exe.parent(), exe.file_name().and_then(|n| n.to_str())) else {
 		return;
-	}
+	};
+	let prefix = format!("{name}.old");
 
-	let wide: Vec<u16> = old.encode_wide().chain(std::iter::once(0)).collect();
+	let Ok(entries) = std::fs::read_dir(dir) else {
+		return;
+	};
+	for entry in entries.flatten() {
+		let fname = entry.file_name();
+		let Some(fname) = fname.to_str() else { continue };
+		if !fname.starts_with(&prefix) {
+			continue;
+		}
 
-	// SAFETY: `wide` is a NUL-terminated UTF-16 string living for the duration
-	// of the call; a null destination requests deletion rather than a move. The
-	// call only registers a pending operation and returns immediately. A zero
-	// return means failure (typically ERROR_ACCESS_DENIED without admin), which
-	// we intentionally ignore — the next-update cleanup is the fallback.
-	unsafe {
-		MoveFileExW(wide.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT);
+		let wide: Vec<u16> = entry
+			.path()
+			.as_os_str()
+			.encode_wide()
+			.chain(std::iter::once(0))
+			.collect();
+
+		// SAFETY: `wide` is a NUL-terminated UTF-16 string living for the
+		// duration of the call; a null destination requests deletion rather
+		// than a move. The call only registers a pending operation and returns
+		// immediately. A zero return means failure (typically
+		// ERROR_ACCESS_DENIED without admin), which we intentionally ignore —
+		// the next-update sweep is the fallback.
+		unsafe {
+			MoveFileExW(wide.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT);
+		}
 	}
 }
 

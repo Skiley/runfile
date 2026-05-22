@@ -718,14 +718,20 @@ crates/
   `$ProgressPreference = 'SilentlyContinue'` so its internal `Invoke-WebRequest -OutFile` of the archive doesn't
   crawl when stdout is redirected (another non-interactive 5.1 slowdown). `--version <tag>` pins a release;
   absent → latest. The install-script URLs are `cfg`-gated per platform so each compile only references
-  the one it uses. **Windows self-replacement**: you can't overwrite a running `.exe`, but you can rename it —
-  `install.ps1` renames any existing `run.exe` to `run.exe.old` (deleting a stale prior `.old` first) before
-  moving the new binary in, so `:update` works while `run.exe` is executing. `install.ps1` then tries to delete
-  the `.old` immediately, which succeeds on a manual `iwr | iex` upgrade (the old binary isn't running) but fails
-  during `:update` (it's the live process image). For the `:update` case, `schedule_old_deletion_at_reboot(exe)`
-  (Windows-only, via `windows-sys`) calls `MoveFileExW(<exe>.old, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)` to register
-  the locked `.old` for deletion at the next boot. That registry write needs admin, so on the common per-user
-  install it silently no-ops — `install.ps1`'s start-of-next-update sweep is the guaranteed fallback either way.
+  the one it uses. **Windows self-replacement**: you can't overwrite a running `.exe`, but you can rename it
+  (renaming touches only the directory entry, not the locked file data) — `install.ps1` renames any existing
+  `run.exe` to a UNIQUE `run.exe.old-<guid>` name before moving the new binary in, so `:update` works while
+  `run.exe` is executing. The GUID suffix is deliberate: a fixed `run.exe.old` could already exist and be
+  locked (e.g. a prior update's process hadn't exited, or an AV/indexer held a handle), and `Rename-Item`
+  cannot overwrite an existing name — so the rename would silently fail, leave `run.exe` in place, and the
+  subsequent `Move-Item` would fail with the confusing "Cannot create a file when that file already exists"
+  (it can't overwrite the running binary). A fresh GUID name never collides, so the rename always succeeds.
+  `install.ps1` then sweeps all `run.exe.old*` aside-files: dead ones from finished prior updates get deleted,
+  while the just-created one (the live process image during `:update`) stays locked and its delete is ignored.
+  For that locked aside-file, `schedule_old_deletion_at_reboot(exe)` (Windows-only, via `windows-sys`) scans the
+  install dir for every `<exe>.old*` and calls `MoveFileExW(.., NULL, MOVEFILE_DELAY_UNTIL_REBOOT)` to register
+  each for deletion at the next boot. That registry write needs admin, so on the common per-user install it
+  silently no-ops — `install.ps1`'s next-update sweep is the guaranteed fallback either way.
   Unix `mv`-over-running-binary already works, so `install.sh` is unchanged.
 - Global flags: `-f`/`--file` (custom Runfile path), `--timings` (print execution times), `-y`/`--yes` (skip
   confirms), `--stdin-args` (prompt for missing `ARGS.*`/`ENV.*`/`FLAGS.*` instead of erroring),

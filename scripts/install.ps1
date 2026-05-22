@@ -38,23 +38,27 @@ try {
   $dest = Join-Path $installDir 'run.exe'
 
   # Windows won't let you overwrite a running .exe, but it WILL let you rename
-  # one. Move any existing binary aside first so `run :update` (which runs
-  # this script while run.exe is executing) works. The running process keeps
-  # its on-disk image at run.exe.old; we delete any stale .old from a previous
-  # update first (it's a dead file by now and safe to remove).
+  # one (renaming only touches the directory entry, not the locked file data).
+  # So move any existing binary aside before dropping the new one in. We rename
+  # to a UNIQUE name rather than a fixed `run.exe.old`: a previous update may
+  # have left a `.old` that is still locked (its process hadn't exited, or an
+  # AV/indexer held a handle), and `Rename-Item` cannot overwrite an existing
+  # name — it would fail and leave run.exe in place, after which `Move-Item`
+  # can't overwrite the running binary either. A fresh GUID-suffixed name can
+  # never collide, so the rename — and therefore the whole update — always
+  # succeeds.
   if (Test-Path $dest) {
-    $old = "$dest.old"
-    Remove-Item -Path $old -Force -ErrorAction SilentlyContinue
-    Rename-Item -Path $dest -NewName 'run.exe.old' -ErrorAction SilentlyContinue
+    $asideName = "run.exe.old-$([guid]::NewGuid().ToString('N'))"
+    Rename-Item -Path $dest -NewName $asideName
   }
   Move-Item -Path (Join-Path $tmp "runfile-cli-$target\run.exe") -Destination $dest -Force
 
-  # Try to drop the .old now. Succeeds on a manual upgrade (the old binary
-  # isn't running), so that path leaves no litter. During `run :update` it's
-  # the live process image and stays locked — the updater schedules it for
-  # deletion at the next reboot, and the next update sweeps it regardless.
-  $old = "$dest.old"
-  if (Test-Path $old) { Remove-Item -Path $old -Force -ErrorAction SilentlyContinue }
+  # Sweep aside-files from this and prior updates. The one we just created is
+  # the live process image during `run :update` and stays locked (its delete
+  # fails and is ignored); ones left by finished prior updates are dead files
+  # and get cleaned up here.
+  Get-ChildItem -Path $installDir -Filter 'run.exe.old*' -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue }
 
   Write-Host "Installed run.exe to $dest"
 
