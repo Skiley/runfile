@@ -50,14 +50,20 @@
 			]
 		},
 		"install": {
-			"description": "Copies the built binary to .local/bin",
+			"description": "Copies the built binary to .local/bin as \"rund\"",
 			"commands": [
 				{
 					"if": "{{ RUN.os == 'windows' }}",
-					"then": "{{ define(executable, 'run.exe') }}",
-					"else": "{{ define(executable, 'run') }}"
+					"then": [
+						"{{ define(executable, 'run.exe') }}",
+						"{{ define(installed, 'rund.exe') }}"
+					],
+					"else": [
+						"{{ define(executable, 'run') }}",
+						"{{ define(installed, 'rund') }}"
+					]
 				},
-				"cp {{ ENV.CARGO_TARGET_DIR }}/debug/{{ VARS.executable }} ~/.local/bin/{{ VARS.executable }}"
+				"cp {{ ENV.CARGO_TARGET_DIR }}/debug/{{ VARS.executable }} ~/.local/bin/{{ VARS.installed }}"
 			],
 			"detach": true,
 			"forceShell": "sh",
