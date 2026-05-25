@@ -224,6 +224,11 @@ but you can use it anywhere:
   { "if": "{{ ARGS.env != 'development' && ARGS.env != 'production' }}",
     "then": ["./deploy-staging.sh"] },
 
+  // Invert any boolean-returning value with unary `!` — including the
+  // comparison helpers (`less_than`, `is_number`, …) and `contains` etc.:
+  { "if": "{{ !is_number(ARGS.port) }}",
+    "then": ["echo 'port must be a number' && exit 1"] },
+
   // FLAGS.x works as a bare boolean inside DSL — no `== 'true'` needed:
   { "if": "{{ RUN.os == 'windows' && FLAGS.wsl }}",
     "then": "wsl --shell-type login -- vite build" },
@@ -263,6 +268,7 @@ and work as full substitution bodies *or* as chain segments:
   //   build     : concat, join
   //   split     : nth, first, last, count_parts
   //   math      : add, subtract, multiply, divide
+  //   compare   : less_than, less_than_or_equal, greater_than, greater_than_or_equal, is_number
   //   validate  : one_of
   //   encoding  : base64_encode, base64_decode
   //   hashing   : sha256, md5
@@ -316,6 +322,15 @@ and work as full substitution bodies *or* as chain segments:
   // "6.1"). Divide-by-zero errors out.
   "echo next-build={{ add(VARS.versionCode, '1') }}",
   "echo half={{ divide(VARS.total, '2') }}",
+
+  // Numeric comparisons — coerce both args to numbers (same rules as the
+  // arithmetic family, so non-numeric input errors) and return "true"/"false",
+  // so they work as DSL `Truthy` values in `if` conditions:
+  // "if": "{{ greater_than(VARS.count, '50') }}"
+  // "if": "{{ less_than_or_equal(ARGS.retries, '3') }}"
+  // `is_number` tests whether a value parses as a (finite) number — it returns
+  // "false" instead of erroring on non-numeric input:
+  // "if": "{{ is_number(ARGS.port) }}"
 
   // Validate a value against a fixed allow-list. Returns the value on
   // match; lists every valid option in the error on mismatch. Collapses

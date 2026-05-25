@@ -430,6 +430,13 @@ crates/
   the shortest round-trip `f64` Display otherwise — so `add('5', '3')` → `"8"`, `add('5.5',
   '2.3', '1.2')` → `"9"`, `add('5', '1.1')` → `"6.1"`, `subtract('5', '5')` → `"0"`; `divide`
   errors as [`SubstitutionError::DivideByZero`] on any zero divisor in the fold),
+  `less_than(a, b)` / `less_than_or_equal(a, b)` / `greater_than(a, b)` / `greater_than_or_equal(a, b)`
+  (exactly 2 args; both coerced via [`parse_numeric`] — same numeric rules as the arithmetic family, so
+  non-numeric / `inf` / `nan` error as `InvalidNumeric`; return the literal `"true"` / `"false"` so they
+  double as `Truthy` DSL values; shared body is the `numeric_compare` helper),
+  `is_number(s)` (1 arg; returns `"true"` if `s.trim()` parses as a finite `f64`, else `"false"` — unlike
+  the arithmetic family it does NOT error on non-numeric input, since detection is the whole point; `inf` /
+  `nan` are not numbers, matching `parse_numeric`),
   `try(expr)` (special-cased before the bulk arg-eval
   pass so inner errors are catchable; see "**`try(expr)` semantics**" below), `define(name, value)`
   (returns `""`, side effect: sets `VARS.name`), and `set_cwd(path)` (returns `""`, side effect: mutates

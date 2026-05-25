@@ -672,6 +672,7 @@ one space — strict whitespace).
   //   build     : concat, join
   //   split     : nth, first, last, count_parts
   //   math      : add, subtract, multiply, divide
+  //   compare   : less_than, less_than_or_equal, greater_than, greater_than_or_equal, is_number
   //   validate  : one_of
   //   encoding  : base64_encode, base64_decode
   //   hashing   : sha256, md5
@@ -696,6 +697,9 @@ one space — strict whitespace).
   // "if": "{{ starts_with(ARGS.path, '/usr') }}"
   // "if": "{{ regex_matches(ARGS.tag, '^v[0-9]+$') }}"
   // "if": "{{ file_exists('.env.local') }}"
+  // "if": "{{ greater_than(VARS.count, '50') }}"
+  // Invert any boolean with unary `!`:
+  // "if": "{{ !is_number(ARGS.port) }}"
 ]
 ```
 
@@ -711,6 +715,7 @@ one space — strict whitespace).
 | **build**     | `concat(s1, s2, …)` (variadic ≥1), `join(sep, s1, s2, …)` (variadic ≥1; `join(sep)` returns `""`).                                                                                                                         |
 | **split**     | `nth(s, sep, i)`, `first(s, sep)`, `last(s, sep)` (canonical "basename" idiom), `count_parts(s, sep)` (decimal string).                                                                                                    |
 | **math**      | `add(a, b, …)`, `subtract(a, b, …)`, `multiply(a, b, …)`, `divide(a, b, …)` — variadic (≥2 args). Coerce strings to numbers (decimal integer, float, or scientific); non-numeric, `inf`, and `nan` error as `InvalidNumeric`. Result formats as an integer when the value has no fractional part and as a decimal otherwise (`add('5', '3')` → `"8"`, `add('5.5', '2.3', '1.2')` → `"9"`, `add('5', '1.1')` → `"6.1"`). `divide` errors as `DivideByZero` if any divisor in the fold is `0`.                                                                                                                              |
+| **compare**   | `less_than(a, b)`, `less_than_or_equal(a, b)`, `greater_than(a, b)`, `greater_than_or_equal(a, b)` (2 args each) — coerce both args to numbers (same rules as the math family, so non-numeric / `inf` / `nan` error as `InvalidNumeric`) and return `"true"` / `"false"`, so they double as DSL Truthy values in `if`. `is_number(s)` (1 arg) returns `"true"` if `s` parses as a finite number, else `"false"` — unlike the math family it does NOT error on non-numeric input. |
 | **validate**  | `one_of(value, opt1, opt2, …)` (variadic ≥2) — returns `value` if it matches one of the options by exact string equality; else errors as `OneOfNoMatch` with every valid option listed. Collapses the "validate against an enum-shaped allow-list" pattern (otherwise a `match` block whose only purpose is rebinding the value to itself).                                                                                                                                       |
 | **encoding**  | `base64_encode(s)`, `base64_decode(s)` (errors on invalid base64 or non-UTF-8).                                                                                                                                            |
 | **hashing**   | `sha256(s)`, `md5(s)` — hex digest of UTF-8 bytes. **`md5` is non-cryptographic** — use `sha256` for security-sensitive contexts.                                                                                          |

@@ -9413,6 +9413,180 @@ mod functions {
 		assert_eq!(result, "8");
 	}
 
+	// ── numeric comparisons & is_number ──
+
+	#[test]
+	fn less_than_true_and_false() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ less_than('10', '50') }}", &HashMap::new()).unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ less_than('50', '50') }}", &HashMap::new()).unwrap(),
+			"false"
+		);
+		assert_eq!(
+			args.substitute("{{ less_than('60', '50') }}", &HashMap::new()).unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn less_than_or_equal_includes_equality() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ less_than_or_equal('50', '50') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ less_than_or_equal('60', '50') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn greater_than_true_and_false() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ greater_than('60', '50') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ greater_than('50', '50') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn greater_than_or_equal_includes_equality() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ greater_than_or_equal('50', '50') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ greater_than_or_equal('40', '50') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn comparison_accepts_floats_and_trims() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ less_than(' 2.5 ', '10') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+	}
+
+	#[test]
+	fn comparison_rejects_non_numeric() {
+		let args = RunArgs::parse(&[]);
+		let err = args
+			.substitute("{{ less_than('5', 'oops') }}", &HashMap::new())
+			.unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::InvalidNumeric { ref name, .. } if name == "less_than"
+		));
+	}
+
+	#[test]
+	fn comparison_requires_two_args() {
+		let args = RunArgs::parse(&[]);
+		let err = args.substitute("{{ greater_than('5') }}", &HashMap::new()).unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::FunctionArity { ref name, got: 1, .. } if name == "greater_than"
+		));
+	}
+
+	#[test]
+	fn comparison_works_with_vars() {
+		let args = RunArgs::parse(&[]);
+		let template = "{{ define(x, '30') }}{{ less_than(VARS.x, '50') }}";
+		assert_eq!(args.substitute(template, &HashMap::new()).unwrap(), "true");
+	}
+
+	#[test]
+	fn comparison_negates_via_dsl_bang() {
+		// `less_than` returns a Truthy value, so the DSL `!` operator inverts it.
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ !less_than('10', '50') }}", &HashMap::new())
+				.unwrap(),
+			"false"
+		);
+		assert_eq!(
+			args.substitute("{{ !less_than('60', '50') }}", &HashMap::new())
+				.unwrap(),
+			"true"
+		);
+	}
+
+	#[test]
+	fn is_number_detects_numbers() {
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ is_number('42') }}", &HashMap::new()).unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ is_number('3.14') }}", &HashMap::new()).unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ is_number('1e3') }}", &HashMap::new()).unwrap(),
+			"true"
+		);
+		assert_eq!(
+			args.substitute("{{ is_number(' 7 ') }}", &HashMap::new()).unwrap(),
+			"true"
+		);
+	}
+
+	#[test]
+	fn is_number_rejects_non_numbers_without_erroring() {
+		// Unlike the arithmetic family, non-numeric input is `"false"`, not an error.
+		let args = RunArgs::parse(&[]);
+		assert_eq!(
+			args.substitute("{{ is_number('oops') }}", &HashMap::new()).unwrap(),
+			"false"
+		);
+		assert_eq!(
+			args.substitute("{{ is_number('') }}", &HashMap::new()).unwrap(),
+			"false"
+		);
+		assert_eq!(
+			args.substitute("{{ is_number('inf') }}", &HashMap::new()).unwrap(),
+			"false"
+		);
+		assert_eq!(
+			args.substitute("{{ is_number('nan') }}", &HashMap::new()).unwrap(),
+			"false"
+		);
+	}
+
+	#[test]
+	fn is_number_requires_one_arg() {
+		let args = RunArgs::parse(&[]);
+		let err = args
+			.substitute("{{ is_number('1', '2') }}", &HashMap::new())
+			.unwrap_err();
+		assert!(matches!(
+			err,
+			SubstitutionError::FunctionArity { ref name, got: 2, .. } if name == "is_number"
+		));
+	}
+
 	// ── capture ──
 
 	#[test]
