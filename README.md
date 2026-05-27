@@ -483,9 +483,12 @@ namespace.
 #### Readable parallel output
 
 When commands run in parallel (`"parallel": true` on a target or `for` block), each branch's stdout/stderr is
-line-buffered, prefixed with its step number `[N]`, and stripped of cursor-control escapes — so progress-bar
-redraws (`docker compose pull`, `cargo build`, etc.) become chronological append-only lines instead of corrupting
-each other's output. SGR colors flow through unchanged. The prefix propagates through `@target` invocations too,
+line-buffered, prefixed with a colored bracketed label identifying the branch, and stripped of cursor-control
+escapes — so progress-bar redraws (`docker compose pull`, `cargo build`, etc.) become chronological append-only
+lines instead of corrupting each other's output. The label shows the full resolved `@target` invocation
+(`[@dev --port 5000]`) for target-call branches, or the raw command truncated to 12 characters (`[docker compo]`)
+for shell branches; each label gets one of six cycling colors so adjacent branches stay distinct.
+SGR colors flow through unchanged. The prefix propagates through `@target` invocations too,
 so monorepo fan-outs like `{ "for": "ns", "in": "namespaces", "do": "@{{ VARS.ns }}:dev" }` tag every nested shell
 with its branch identity. Set `RUNFILE_NO_LINE_PREFIX=1` to opt out and inherit raw stdio.
 

@@ -10,7 +10,8 @@ use crate::logging::{
 	StepCounter,
 };
 use crate::parallel_output::{
-	flush_writer_thread, format_parallel_prefix, line_prefixing_enabled, spawn_line_pump, OutputStream,
+	flush_writer_thread, format_parallel_prefix, line_prefixing_enabled, shell_prefix_label, spawn_line_pump,
+	OutputStream,
 };
 use crate::stdio_tailer::StdioTailerSet;
 use runfile_parser::{
@@ -1654,12 +1655,20 @@ fn run_parallel_batch(
 	// build the failure summary after the fact (e.g. `@web-user:build:infrastructure`).
 	let mut target_labels: Vec<String> = Vec::new();
 	for (leaf, &(step, _total)) in leaves.into_iter().zip(step_pairs.iter()) {
+		// The bracket label reflects what's running: a resolved `@target` call
+		// (shown in full) or a raw shell command (truncated to 12 chars).
+		let label = match &leaf {
+			ParallelLeaf::Shell { substituted, .. } => shell_prefix_label(substituted),
+			ParallelLeaf::TargetCall {
+				target, argv, optional, ..
+			} => format_target_call_label(target, argv, *optional),
+		};
 		let leaf_prefix = if !prefix_output {
 			None
 		} else if let Some(parent) = setup.output_prefix.as_deref() {
 			Some(parent.to_string())
 		} else {
-			Some(format_parallel_prefix(step))
+			Some(format_parallel_prefix(step, &label))
 		};
 		match leaf {
 			ParallelLeaf::Shell {

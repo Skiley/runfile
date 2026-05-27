@@ -6178,8 +6178,8 @@ fn dummy_success_status() -> std::process::ExitStatus {
 #[test]
 fn parallel_target_calls_receive_per_leaf_output_prefix() {
 	// A parallel target with three `@dep` leaves and no inherited prefix
-	// must hand each leaf a distinct per-step prefix derived from the
-	// global step counter (`[1]`, `[2]`, `[3]`).
+	// must hand each leaf a distinct prefix labelled with the resolved
+	// `@target` call (`[@one]`, `[@two]`, `[@three]`).
 	use crate::executor::execute_parallel_with_counter;
 	use crate::logging::StepCounter;
 
@@ -6229,7 +6229,7 @@ fn parallel_target_calls_receive_per_leaf_output_prefix() {
 	calls.sort_by(|a, b| a.target.cmp(&b.target));
 
 	// Each leaf must have received SOME prefix (a Some), and the three
-	// prefixes must be distinct (per-leaf step numbering, not all empty
+	// prefixes must be distinct (per-leaf command labels, not all empty
 	// or all equal).
 	assert_eq!(calls.len(), 3);
 	for c in &calls {
@@ -6242,12 +6242,12 @@ fn parallel_target_calls_receive_per_leaf_output_prefix() {
 		"per-leaf prefixes must be distinct, got {:?}",
 		prefixes
 	);
-	// Each prefix must contain a `[N]` step token.
+	// Each prefix must contain a bracketed label.
 	for c in &calls {
 		let p = c.output_prefix.as_deref().unwrap();
 		assert!(
 			p.contains('[') && p.contains(']'),
-			"prefix should contain [N], got {:?}",
+			"prefix should contain a bracketed label, got {:?}",
 			p
 		);
 	}

@@ -509,11 +509,13 @@ fn strip_cursor_escapes(input: &[u8]) -> Vec<u8> {
 	out
 }
 
-/// Build the prefix string for a parallel leaf's output, given its global
-/// step number. Honors `NO_COLOR` for plain output in non-terminal contexts.
-pub(crate) fn format_parallel_prefix(step: usize) -> String {
+/// Build the prefix string for a parallel leaf's output. `label` is the text
+/// shown inside the brackets (a command snippet or resolved `@target` call);
+/// `step` only drives the cycling color so adjacent leaves stay visually
+/// distinct. Honors `NO_COLOR` for plain output in non-terminal contexts.
+pub(crate) fn format_parallel_prefix(step: usize, label: &str) -> String {
 	if std::env::var_os("NO_COLOR").is_some() {
-		format!("[{step}] ")
+		format!("[{label}] ")
 	} else {
 		// Cycle through a small palette so adjacent parallel leaves are
 		// visually distinct. Matches the spirit of `concurrently` / `pnpm`.
@@ -527,8 +529,17 @@ pub(crate) fn format_parallel_prefix(step: usize) -> String {
 		];
 		const RESET: &str = "\x1b[0m";
 		let color = COLORS[step.saturating_sub(1) % COLORS.len()];
-		format!("{color}[{step}]{RESET} ")
+		format!("{color}[{label}]{RESET} ")
 	}
+}
+
+/// Build the bracket label for a raw shell leaf: the resolved command
+/// truncated to at most 12 characters (Unicode scalars, not bytes), taken
+/// from the first non-empty line and with surrounding whitespace trimmed so
+/// the prefix stays compact and readable.
+pub(crate) fn shell_prefix_label(substituted: &str) -> String {
+	let first_line = substituted.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+	first_line.chars().take(12).collect()
 }
 
 /// Whether parallel children should pipe + prefix their output. Disabled by
@@ -619,11 +630,22 @@ mod tests {
 	}
 
 	#[test]
-	fn prefix_contains_step_number() {
-		// Always contains the step number, regardless of NO_COLOR setting.
-		let p = format_parallel_prefix(7);
-		assert!(p.contains("[7]"));
+	fn prefix_contains_label() {
+		// Always contains the label, regardless of NO_COLOR setting.
+		let p = format_parallel_prefix(7, "@build");
+		assert!(p.contains("[@build]"));
 		assert!(p.ends_with(' '));
+	}
+
+	#[test]
+	fn shell_label_truncates_to_12_chars() {
+		assert_eq!(shell_prefix_label("echo hello world"), "echo hello w");
+		assert_eq!(shell_prefix_label("short"), "short");
+	}
+
+	#[test]
+	fn shell_label_uses_first_nonempty_line_trimmed() {
+		assert_eq!(shell_prefix_label("\n   \n  npm run build  \n"), "npm run buil");
 	}
 
 	// ── End-to-end pump tests via OutputStream::Capture ───────────────

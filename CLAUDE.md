@@ -646,9 +646,14 @@ crates/
 - `parallel_output.rs`: line-buffered, prefixed stdout/stderr for parallel shell children. `spawn_line_pump`
   reads from a `ChildStdout`/`ChildStderr`, splits on `\n` and `\r` (CR-as-soft-break flattens progress-bar
   redraws into chronological append-only lines), strips non-SGR ANSI escapes (cursor movement, erase-line, OSC
-  title — SGR `…m` color/style codes are preserved), and writes each completed line prefixed with `[N] ` where
-  N is the global step number. Each prefix uses one of six cycling ANSI colors so adjacent leaves are visually
-  distinct; honors `NO_COLOR` for plain output. `\r\n` is collapsed (the LF after a CR is swallowed) so we
+  title — SGR `…m` color/style codes are preserved), and writes each completed line prefixed with a bracketed
+  label identifying the leaf. The label content comes from the leaf type: a `@target` call shows its FULL
+  resolved invocation (`[@build]`, `[@dev --port 5000]`, `[@deploy a b c]`) via `format_target_call_label`; a
+  raw shell command shows its resolved text truncated to 12 Unicode scalars via `shell_prefix_label`
+  (first non-empty line, trimmed — e.g. `[npm run buil]`). `format_parallel_prefix(step, label)` still uses
+  the global step number ONLY to pick one of six cycling ANSI colors so adjacent leaves stay visually
+  distinct; the displayed text is the label, not the step number.
+  Honors `NO_COLOR` for plain output. `\r\n` is collapsed (the LF after a CR is swallowed) so we
   don't emit spurious empty lines. Each line is one `write_all` to the locked global stdout/stderr handle —
   prefix + content + newline lands as a single atomic write so two children can't interleave mid-line.
   `RUNFILE_NO_LINE_PREFIX=1`/`true` opts out (raw stdio inheritance). Pump threads terminate naturally on EOF
@@ -656,9 +661,9 @@ crates/
   flushed before the function returns.
 - Output-prefix inheritance rule: when a parallel batch is reached via an ancestor that already set a prefix
   (i.e. this target was dispatched as `@dep` from an outer parallel parent and `setup.output_prefix.is_some()`),
-  every leaf in this batch inherits that prefix verbatim — no per-leaf step renumbering. This preserves the
-  outer partition identity end-to-end: a `[3]`-tagged branch stays `[3]` even when its dispatched target is
-  itself `parallel: true`. Nested differentiation isn't applied; only the outermost parallel layer is the
+  every leaf in this batch inherits that prefix verbatim — no per-leaf relabeling. This preserves the
+  outer partition identity end-to-end: a `[@web:dev]`-tagged branch keeps that label even when its dispatched
+  target is itself `parallel: true`. Nested differentiation isn't applied; only the outermost parallel layer is the
   source of distinct prefixes. Sequential `execute_one_shell` and the `when:failure` / `when:always`
   fallback path (`run_sequential_leaves`) honor the same inherited prefix.
 - `stdio_tailer.rs`: `StdioTailerSet` manages background threads that tail log files and route complete lines to
@@ -893,7 +898,9 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   `run_dependency`) so a top-level `run _target_with_ignoreerrors` still sees the raw `ExecutionResult` from
   `execute_command_with_counter` (failure count + `final_status` reflecting the last command's actual exit).
 - `parallel` spawns all shell commands simultaneously; their stdout/stderr is piped through line-buffered reader
-  threads that prefix every line with `[N]` (the global step number) and strip non-SGR ANSI cursor-control
+  threads that prefix every line with a bracketed label — the full resolved `@target` call (`[@dev --port 5000]`)
+  or the raw command truncated to 12 chars (`[docker compo]`), colored by a per-step cycling palette — and strip
+  non-SGR ANSI cursor-control
   escapes — so progress-bar redraws (`docker compose pull`, etc.) become append-only chronological lines instead
   of corrupting interleaved output. Stdin is inherited. **Failure summary**: when at least one leaf in a parallel
   batch failed, [`log_parallel_failure_summary`] prints a final `[runfile] [parallel] N command(s) failed:` block

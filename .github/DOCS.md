@@ -1960,9 +1960,11 @@ but the CLI exits with code 0.
 
 ### Output prefixing
 
-Each parallel branch's stdout/stderr is line-buffered, prefixed with its step number `[N]`, and stripped of cursor-control
+Each parallel branch's stdout/stderr is line-buffered, prefixed with a colored bracketed label, and stripped of cursor-control
 ANSI escapes — so progress-bar redraws (`docker compose pull`, `cargo build`, etc.) become chronological append-only
-lines instead of corrupting each other's output. SGR colours flow through unchanged. The prefix propagates through
+lines instead of corrupting each other's output. The label is the full resolved `@target` invocation (`[@dev --port 5000]`)
+for target-call branches, or the raw command truncated to 12 characters (`[docker compo]`) for shell branches; each label
+gets one of six cycling colours so adjacent branches stay distinct. SGR colours flow through unchanged. The prefix propagates through
 `@target` invocations too, so a `parallel` parent that fans out via `for in: "namespaces"` + `@{{ VARS.ns }}:dev` tags
 every nested shell with its branch identity.
 
