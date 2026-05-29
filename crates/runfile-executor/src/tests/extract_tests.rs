@@ -632,3 +632,38 @@ fn extract_env_value_with_spaces_quoted_bash() {
 	let lines = format_extracted_commands(&commands, &ShellKind::Bash);
 	assert_eq!(lines[0], "MSG='hello world' echo hello");
 }
+
+#[test]
+fn extract_working_directory_resolves_env_from_globals() {
+	// Regression (dry-run): `{{ ENV.X }}` inside `workingDirectory` must resolve
+	// against the target's own env (globals' `env` is baked into each target
+	// during merge), not just the parent env. Previously `--dry-run` errored with
+	// "environment variable not set" before printing any command.
+	use crate::extract::extract_target;
+	use runfile_parser::{merge_runfiles, parse_runfile};
+
+	let dir = TempDir::new().unwrap();
+	let runfile_path = dir.path().join("Runfile.json");
+	let json = r#"{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "globals": {
+            "env": { "PROJECT_PATH": "/some/project" }
+        },
+        "targets": {
+            "build": {
+                "commands": ["echo hi"],
+                "workingDirectory": "{{ ENV.PROJECT_PATH }}"
+            }
+        }
+    }"#;
+
+	// `globals.env` is baked into each target's `env` during merge, so go through
+	// `merge_runfiles` rather than a plain parse.
+	let parsed = parse_runfile(json).unwrap();
+	let merged = merge_runfiles(Some((parsed, runfile_path)), &[], dir.path()).unwrap();
+	let args = RunArgs::default();
+
+	let commands = extract_target("build", &merged.runfile, &args, dir.path()).unwrap();
+	assert_eq!(commands.len(), 1);
+	assert_eq!(commands[0].command, "echo hi");
+}

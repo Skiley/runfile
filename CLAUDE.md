@@ -752,11 +752,21 @@ crates/
 - `runner.rs`: high-level `run_target()` function that builds env and dispatches command execution. The CLI calls
   `run_target()` instead of `execute_command()` directly. No globals threading — everything is already on the
   `CommandSpec`. `RunRoot` holds a `StepCounter` initialized to `count_target_leaves(target_name, ...)`, threaded
-  through every nested `_with_counter` call so step numbers stay continuous. `forceShell` and `workingDirectory`
-  are substituted (against args + parent env) before resolution. `workingDirectory` is a free-form path that
+  through every nested `_with_counter` call so step numbers stay continuous. `forceShell` is substituted against
+  the parent env (the parent's already-resolved env for an `@dep` call; empty at top level) before resolution —
+  it picks the shell, so the target's own env isn't built yet. `workingDirectory` is a free-form path that
   supports `{{ ... }}` substitution; default (when unset) is `{{ RUN.parent }}` (the target's source Runfile
   directory). After substitution, relative paths are resolved against the target's source Runfile dir via
   `resolve_working_directory_path`. There is no per-value validation — any path string is accepted.
+  **`workingDirectory` resolves `{{ ENV.* }}` / `{{ VAR.* }}` against the target's OWN env (globals' `env` is baked
+  into every target during merge) and declared `vars`, not just the parent env.** Env VALUES don't depend on the
+  working dir — only relative `addToPath` PATH assembly does, and those entries are baked to absolute at parse
+  time — so when the `workingDirectory` template contains `ENV.`/`VAR.`, the runner builds the full target env up
+  front (via `build_env_with_base` with the source Runfile dir as the addToPath/envFiles base) plus a transient
+  `DeclaredVarsGuard`, purely to resolve the path; the executor builds the env again for the actual run. Templates
+  with no `ENV.`/`VAR.` reference (a literal path, the `{{ RUN.parent }}` default, `{{ ARG.* }}` / `{{ RUN.* }}`)
+  stay on the cheap parent-env path with no extra build. The `--dry-run` extract pipeline mirrors this: it builds
+  the env (and applies declared vars) BEFORE resolving `workingDirectory` so dry-run resolves the path identically.
 - Has a `windows-sys` dependency (Windows-only) for console ANSI support
 
 ### runfile-cli
@@ -940,7 +950,11 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
 - `forceShell` and `workingDirectory` accept `{{ ... }}` substitutions. `workingDirectory` is a free-form path
   (absolute or relative) with no per-value validation — anything that resolves at runtime is accepted. Default
   (when unset) is `{{ RUN.parent }}` (target's source Runfile dir). Relative paths are resolved against the
-  target's source Runfile directory by `resolve_working_directory_path`.
+  target's source Runfile directory by `resolve_working_directory_path`. `workingDirectory` can reference the
+  target's own `env` (including values inherited from `globals.env`, which are baked into each target during
+  merge) and declared `vars` via `{{ ENV.* }}` / `{{ VAR.* }}` — the runner builds the target's full env before
+  resolving the path (see the runner section above). `forceShell`, by contrast, is resolved before the shell (and
+  thus the target's env) is known, so it only sees the parent/inherited env, not the target's own `env` block.
 - Control flow (`if` / `for` / `match` blocks) is evaluated by Runfile itself, not by the shell — same semantics
   on every platform. Conditions use a tiny boolean DSL parsed at Runfile load time (errors fail fast). Truthiness
   rule: only

@@ -331,12 +331,13 @@ fn run_target_inner_body(
 		.get(target_name)
 		.ok_or_else(|| RunError::UnknownTarget(target_name.to_string()))?;
 
-	// Build a thin env for substituting `forceShell` and `workingDirectory`.
-	// These fields can carry `{{ ... }}` substitutions; we resolve them BEFORE
-	// the full env is built (since the working dir is needed to load env
-	// files). `parent_env` (if any) and `args` are enough — substitution of
-	// `forceShell` / `workingDirectory` against `{{ ENV.X }}` references the
-	// parent's env, not the target's own envFiles.
+	// Thin env for substituting `forceShell` (and the cheap path for
+	// `workingDirectory` when it references neither `ENV.` nor `VAR.`).
+	// `forceShell` is resolved before the shell — and therefore before the
+	// target's own env — is known, so it can only see the parent env (the
+	// parent's already-resolved env for an `@dep` call; empty at top level).
+	// `workingDirectory` builds the target's FULL env on demand below so it can
+	// reference globals'/target `env` and declared `vars`.
 	let pre_env: HashMap<String, String> = parent_env.cloned().unwrap_or_default();
 
 	// Per-target view of `RUN.file` / `RUN.parent`: the source Runfile of
@@ -378,8 +379,37 @@ fn run_target_inner_body(
 	// substitution. Default (when unset) is `{{ RUN.parent }}` — the target's
 	// source Runfile directory. After substitution, relative paths are
 	// resolved against that same directory.
+	//
+	// `{{ ENV.* }}` / `{{ VAR.* }}` inside it must resolve against the target's
+	// OWN resolved env (globals' `env` is baked into every target at parse time)
+	// and declared `vars`, not merely the parent env. Env VALUES don't depend on
+	// the working directory — only relative `addToPath` PATH assembly does, and
+	// those entries are baked to absolute at parse time — so we can build the
+	// full env up front (using the source Runfile dir as the addToPath/envFiles
+	// base) purely to resolve the path; the executor builds the env again for the
+	// real run. The build is gated on the template actually referencing
+	// `ENV.`/`VAR.` so the common cases (a literal path, the `{{ RUN.parent }}`
+	// default, `{{ ARG.* }}` / `{{ RUN.* }}`) stay on the cheap parent-env path.
 	let working_directory_template = spec.working_directory.as_deref().unwrap_or(WORKING_DIRECTORY_DEFAULT);
-	let resolved_working_directory = target_args.substitute(working_directory_template, &pre_env)?;
+	let resolved_working_directory =
+		if working_directory_template.contains("ENV.") || working_directory_template.contains("VAR.") {
+			let wd_env = crate::env::build_env_with_base(
+				spec,
+				target_runfile_dir,
+				target_runfile_dir,
+				target_args,
+				root.available_private_keys,
+				parent_env,
+				Some(parent_add_to_path_chain),
+			)?;
+			// Apply declared `vars` so `{{ VAR.* }}` resolves here too. The guard
+			// restores prior values when this block ends; the executor re-applies
+			// them via its own `DeclaredVarsGuard` for the command walk.
+			let _wd_vars_guard = crate::executor::DeclaredVarsGuard::apply(spec, target_args, &wd_env)?;
+			target_args.substitute(working_directory_template, &wd_env)?
+		} else {
+			target_args.substitute(working_directory_template, &pre_env)?
+		};
 	let effective_working_dir = resolve_working_directory_path(&resolved_working_directory, target_runfile_dir);
 
 	let same_shell = spec.same_shell.unwrap_or(false);

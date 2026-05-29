@@ -234,19 +234,17 @@ fn extract_recursive_inner(
 		args
 	};
 
-	// `workingDirectory` is a free-form path supporting `{{ ... }}` substitution;
-	// default is `{{ RUN.parent }}`. We substitute against the parent_env (env
-	// files aren't loaded yet — we need the working dir to load them) and
-	// resolve relative paths against the target's source dir.
-	let pre_env: HashMap<String, String> = parent_env.cloned().unwrap_or_default();
-	let working_directory_template = spec.working_directory.as_deref().unwrap_or(WORKING_DIRECTORY_DEFAULT);
-	let resolved_working_directory = args.substitute(working_directory_template, &pre_env)?;
-	let effective_working_dir_owned = resolve_working_directory_path(&resolved_working_directory, target_runfile_dir);
-	let effective_working_dir: &Path = effective_working_dir_owned.as_path();
-
+	// Build the target's env BEFORE resolving `workingDirectory` so `{{ ENV.* }}`
+	// / `{{ VAR.* }}` inside it resolve against the target's OWN env (globals'
+	// `env` is baked into every target at parse time) and declared `vars` — not
+	// just the parent env. Env VALUES don't depend on the working directory (only
+	// relative `addToPath` PATH assembly does, and those entries are baked to
+	// absolute at parse time), so the source Runfile dir is the correct base;
+	// `effective_working_dir` is only needed downstream as the spawn dir and as
+	// the base for `for glob:` expansion.
 	let env = build_env_with_base(
 		spec,
-		effective_working_dir,
+		target_runfile_dir,
 		target_runfile_dir,
 		args,
 		ctx.available_private_keys,
@@ -256,11 +254,20 @@ fn extract_recursive_inner(
 	check_env_case_duplicates(&env)?;
 
 	// Apply the target's declared `vars` so `{{ VAR.* }}` references resolve in
-	// the dry-run output exactly as they would at runtime. The guard restores
-	// prior values when it drops at the end of this function — matching the
-	// per-target scoping the real executor applies, so a parent's vars don't
-	// bleed into a sibling extract and a child's don't leak back up.
+	// the dry-run output exactly as they would at runtime — including inside
+	// `workingDirectory` below. The guard restores prior values when it drops at
+	// the end of this function — matching the per-target scoping the real
+	// executor applies, so a parent's vars don't bleed into a sibling extract and
+	// a child's don't leak back up.
 	let _vars_guard = crate::executor::DeclaredVarsGuard::apply(spec, args, &env)?;
+
+	// `workingDirectory` is a free-form path supporting `{{ ... }}` substitution;
+	// default is `{{ RUN.parent }}`. Relative paths resolve against the target's
+	// source dir.
+	let working_directory_template = spec.working_directory.as_deref().unwrap_or(WORKING_DIRECTORY_DEFAULT);
+	let resolved_working_directory = args.substitute(working_directory_template, &env)?;
+	let effective_working_dir_owned = resolve_working_directory_path(&resolved_working_directory, target_runfile_dir);
+	let effective_working_dir: &Path = effective_working_dir_owned.as_path();
 
 	// Show only the spec-defined env keys (not envFiles or system env), but
 	// pull the resolved values from the fully-built env so `{{ FLAG.x }}`,

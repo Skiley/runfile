@@ -884,6 +884,222 @@ fn working_directory_relative_path_resolves_against_runfile_parent() {
 }
 
 #[test]
+fn working_directory_resolves_env_from_globals() {
+	// Regression: `{{ ENV.X }}` inside `workingDirectory` must resolve against
+	// the target's OWN resolved env, including vars declared in `globals.env`
+	// (which `merge_runfiles` bakes into every target). Previously
+	// `workingDirectory` was substituted against only the parent env (empty at
+	// top level), so this failed with "environment variable not set". A relative
+	// marker proves the command actually ran in the resolved directory.
+	use crate::runner::run_target_with_cwd;
+	use runfile_parser::{merge_runfiles, parse_runfile};
+
+	let shell = get_test_shell();
+	let runfile_dir = TempDir::new().unwrap();
+	let caller_cwd = TempDir::new().unwrap();
+	let project_dir = TempDir::new().unwrap();
+
+	let marker_name = "globals_env_wd.txt";
+	let create_marker = if shell.kind == ShellKind::Cmd {
+		format!("echo done > {marker_name}")
+	} else {
+		format!("touch {marker_name}")
+	};
+	// Forward slashes are absolute on Windows too and need no JSON escaping.
+	let project_path = project_dir.path().display().to_string().replace('\\', "/");
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "globals": {{
+            "env": {{ "PROJECT_PATH": "{project_path}" }}
+        }},
+        "targets": {{
+            "build": {{
+                "commands": ["{create_marker}"],
+                "workingDirectory": "{{{{ ENV.PROJECT_PATH }}}}"
+            }}
+        }}
+    }}"#
+	);
+
+	// `globals.env` is baked into each target's `env` during merge (not plain
+	// parse), so go through `merge_runfiles` to mirror the real CLI pipeline.
+	let runfile_path = runfile_dir.path().join("Runfile.json");
+	let parsed = parse_runfile(&json).unwrap();
+	let merged = merge_runfiles(Some((parsed, runfile_path.clone())), &[], runfile_dir.path()).unwrap();
+
+	let args = RunArgs::default();
+	let result = run_target_with_cwd(
+		"build",
+		&merged.runfile,
+		&shell,
+		&args,
+		&runfile_path,
+		runfile_dir.path(),
+		caller_cwd.path(),
+		&merged.source_dirs,
+		&merged.source_files(),
+		false,
+		false,
+		None,
+	)
+	.unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		project_dir.path().join(marker_name).exists(),
+		"command should run in the dir from globals env (ENV.PROJECT_PATH)"
+	);
+}
+
+#[test]
+fn working_directory_resolves_target_env() {
+	// `{{ ENV.X }}` inside `workingDirectory` resolves against the target's own
+	// `env` block too (not only globals).
+	use crate::runner::run_target;
+	use runfile_parser::parse_runfile;
+
+	let shell = get_test_shell();
+	let project_dir = TempDir::new().unwrap();
+	let runfile_dir = TempDir::new().unwrap();
+
+	let marker_name = "target_env_wd.txt";
+	let create_marker = if shell.kind == ShellKind::Cmd {
+		format!("echo done > {marker_name}")
+	} else {
+		format!("touch {marker_name}")
+	};
+	let project_path = project_dir.path().display().to_string().replace('\\', "/");
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "targets": {{
+            "build": {{
+                "commands": ["{create_marker}"],
+                "env": {{ "TARGET_DIR": "{project_path}" }},
+                "workingDirectory": "{{{{ ENV.TARGET_DIR }}}}"
+            }}
+        }}
+    }}"#
+	);
+
+	let runfile = parse_runfile(&json).unwrap();
+	let args = RunArgs::default();
+	let result = run_target("build", &runfile, &shell, &args, runfile_dir.path()).unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		project_dir.path().join(marker_name).exists(),
+		"command should run in the dir from the target's own env (ENV.TARGET_DIR)"
+	);
+}
+
+#[test]
+fn working_directory_resolves_declared_var() {
+	// `{{ VAR.X }}` inside `workingDirectory` resolves against the target's
+	// declared `vars`, matching the `{{ ENV.X }}` behaviour. The declared vars
+	// must be applied BEFORE `workingDirectory` is resolved.
+	use crate::runner::run_target;
+	use runfile_parser::parse_runfile;
+
+	let shell = get_test_shell();
+	let project_dir = TempDir::new().unwrap();
+	let runfile_dir = TempDir::new().unwrap();
+
+	let marker_name = "declared_var_wd.txt";
+	let create_marker = if shell.kind == ShellKind::Cmd {
+		format!("echo done > {marker_name}")
+	} else {
+		format!("touch {marker_name}")
+	};
+	let project_path = project_dir.path().display().to_string().replace('\\', "/");
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "targets": {{
+            "build": {{
+                "commands": ["{create_marker}"],
+                "vars": {{ "PROJECT_DIR": "{project_path}" }},
+                "workingDirectory": "{{{{ VAR.PROJECT_DIR }}}}"
+            }}
+        }}
+    }}"#
+	);
+
+	let runfile = parse_runfile(&json).unwrap();
+	let args = RunArgs::default();
+	let result = run_target("build", &runfile, &shell, &args, runfile_dir.path()).unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		project_dir.path().join(marker_name).exists(),
+		"command should run in the dir from the declared var (VAR.PROJECT_DIR)"
+	);
+}
+
+#[test]
+fn working_directory_on_globals_resolves_env_from_globals() {
+	// The exact reported scenario: BOTH `workingDirectory` and the env var it
+	// references live in `globals`. `merge_runfiles` bakes both into the target,
+	// and the baked `workingDirectory` must still resolve `{{ ENV.X }}` against
+	// the baked env.
+	use crate::runner::run_target_with_cwd;
+	use runfile_parser::{merge_runfiles, parse_runfile};
+
+	let shell = get_test_shell();
+	let runfile_dir = TempDir::new().unwrap();
+	let caller_cwd = TempDir::new().unwrap();
+	let project_dir = TempDir::new().unwrap();
+
+	let marker_name = "globals_wd_globals_env.txt";
+	let create_marker = if shell.kind == ShellKind::Cmd {
+		format!("echo done > {marker_name}")
+	} else {
+		format!("touch {marker_name}")
+	};
+	let project_path = project_dir.path().display().to_string().replace('\\', "/");
+
+	let json = format!(
+		r#"{{
+        "$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
+        "globals": {{
+            "env": {{ "PROJECT_PATH": "{project_path}" }},
+            "workingDirectory": "{{{{ ENV.PROJECT_PATH }}}}"
+        }},
+        "targets": {{
+            "build": {{ "commands": ["{create_marker}"] }}
+        }}
+    }}"#
+	);
+
+	let runfile_path = runfile_dir.path().join("Runfile.json");
+	let parsed = parse_runfile(&json).unwrap();
+	let merged = merge_runfiles(Some((parsed, runfile_path.clone())), &[], runfile_dir.path()).unwrap();
+
+	let args = RunArgs::default();
+	let result = run_target_with_cwd(
+		"build",
+		&merged.runfile,
+		&shell,
+		&args,
+		&runfile_path,
+		runfile_dir.path(),
+		caller_cwd.path(),
+		&merged.source_dirs,
+		&merged.source_files(),
+		false,
+		false,
+		None,
+	)
+	.unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		project_dir.path().join(marker_name).exists(),
+		"command should run in the dir from globals workingDirectory + globals env"
+	);
+}
+
+#[test]
 fn force_shell_accepts_substitution() {
 	// `forceShell` may be a substituted string. We only verify parsing +
 	// resolution succeeds — a value of `{{ RUN.shell }}` resolves to the shell
