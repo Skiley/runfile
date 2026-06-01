@@ -189,7 +189,7 @@ $ run dev --port=4000           # Named arguments
 | `--timings`           | Print per-target and per-command execution times to stderr                                                         |
 | `-y`, `--yes`         | Skip confirmation prompts (same as CI auto-skip)                                                                   |
 | `--dry-run`           | Show what would be executed without running anything (like `make -n`)                                              |
-| `--stdin-args`        | Prompt via stdin for any missing `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` values instead of failing        |
+| `--stdin-args`        | Prompt via stdin for `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` values that have no default, instead of failing |
 | `--version`           | Print version                                                                                                      |
 | `--help`              | Print help                                                                                                         |
 
@@ -447,25 +447,29 @@ $ run server                      # NODE_ENV=development (literal default)
 
 ### Interactive prompts — `--stdin-args`
 
-The `--stdin-args` flag (placed before the target name, like `--dry-run`) prompts via stdin for any missing
-`{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` reference instead of failing. Substitutions with a literal default are
-also prompted: pressing Enter accepts the default; required values without a default must be supplied or the
-run errors as it would without the flag.
+The `--stdin-args` flag (placed before the target name, like `--dry-run`) prompts via stdin **only for
+genuinely-missing inputs** — references that have no default and would otherwise fail the run. A reference
+that resolves to a value (because it was provided on the CLI, is set in the environment, or **has a default**)
+is never prompted.
 
 ```
 $ run --stdin-args server
-[runfile] enter ARG.env [development]:        # Enter → uses "development"
-[runfile] pass --release? (y/N): y             # toggles {{ FLAG.release }} to true
+[runfile] enter ARG.token (required):          # no default → prompted
+[runfile] pass --release? (y/N): y             # bare {{ FLAG.release }} → prompted
+# {{ ARG.env ? 'development' }} is NOT prompted — it resolves to "development"
 ```
 
-Resolution order with `--stdin-args` set:
+What gets prompted with `--stdin-args` set:
 
-1. CLI args / env / FLAGS that were actually provided still win (no prompt).
-2. If nothing in the chain resolves, the user is prompted with the chain's literal default shown in
-   `[brackets]` (or `(required)` if no default exists).
-3. A non-empty answer overrides the chain.
-4. An empty answer falls through to the chain's default — or surfaces the existing
-   `MissingArg` / `MissingEnv` error if no default exists.
+1. CLI args / env / FLAGS that were actually provided always win (no prompt).
+2. `{{ ARG.x }}` / `{{ ENV.X }}` with **no default** in the chain — prompted as `(required)`. The prompt is
+   keyed on the first `ARG.*` / `ENV.*` segment in the chain. An empty answer surfaces the usual
+   `MissingArg` / `MissingEnv` error.
+3. A chain that reaches a **literal default** (`{{ ARG.x ? 'y' }}`, or the empty-string default
+   `{{ ARG.x ? }}`) is resolved to that default — **not prompted**.
+4. The **bare boolean** flag form `{{ FLAG.x }}` (no ternary / value part) is prompted `y/N`. The
+   ternary / value forms (`{{ FLAG.x ? 'a' : 'b' }}`, `{{ FLAG.x ? 'v' }}`) carry their own default (the
+   false branch / empty), so they resolve without prompting.
 
 `VAR.*` and `RUN.*` are never prompted (they're runtime context). Answers are cached per `(kind, key)` so the
 same value is asked at most once per run, even across `@target` invocations. Works with `--dry-run` too — the
@@ -2557,8 +2561,8 @@ $ run :generate vscode-tasks
 
 Generates (or updates) `.vscode/tasks.json` with one task per Runfile target. Existing user-added fields are preserved
 on update. Targets that use `{{ ARGS }}` patterns get an `${input:args}` variable appended so VS Code prompts for
-arguments. Every generated task is invoked with `--stdin-args` so any unsupplied `{{ ARG.x }}` / `{{ ENV.X }}` /
-`{{ FLAG.x }}` value is prompted in the integrated terminal at run time.
+arguments. Every generated task is invoked with `--stdin-args` so any `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}`
+value that has no default is prompted in the integrated terminal at run time.
 
 ### Zed
 
@@ -2568,8 +2572,8 @@ $ run :generate zed-tasks
 
 Generates (or updates) `.zed/tasks.json` with one task per Runfile target. Existing user-added fields are preserved on
 update. Targets that use `{{ ARGS }}` get `$ZED_CUSTOM_ARGS` appended so Zed prompts for arguments. Every generated task
-is invoked with `--stdin-args` so any unsupplied `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` value is prompted in
-the Zed
+is invoked with `--stdin-args` so any `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` value that has no default is
+prompted in the Zed
 terminal at run time.
 
 ### JetBrains (IntelliJ, CLion, RustRover, WebStorm, etc.)
@@ -2581,7 +2585,7 @@ $ run :generate jetbrains-run-configurations
 Generates Shell Script run configurations (one `.xml` file per target) in the `.run/` directory. Each configuration runs
 `run --stdin-args <target>` with the working directory set to `$PROJECT_DIR$` — JetBrains run configs are static (no
 per-invocation parameter UI), so `--stdin-args` covers targets that need user input by prompting at run time for any
-unsupplied `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` value. Re-generating upgrades configs created by older
+`{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` value that has no default. Re-generating upgrades configs created by older
 Runfile
 versions in place.
 

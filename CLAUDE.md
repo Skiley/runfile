@@ -299,8 +299,9 @@ crates/
 - `RunArgs`: parses CLI args into positional (`{{ ARGS }}`) and named (`--key=value`). Carries a `run_context: RunContext`
   field used to resolve `{{ RUN.* }}` substitutions; populated by the CLI via `RunArgs::parse(...).with_run_context(...)`.
   Also carries an optional `stdin_prompter: Option<Arc<dyn StdinPrompter>>` — when set (top-level CLI flag
-  `--stdin-args`), missing `{{ ARG.* }}` / `{{ ENV.* }}` / `{{ FLAG.* }}` references trigger a stdin prompt instead of
-  erroring. The prompter trait lives in `args.rs` alongside `InteractiveStdinPrompter` (the default impl that
+  `--stdin-args`), `{{ ARG.* }}` / `{{ ENV.* }}` references with no default (and the bare boolean `{{ FLAG.x }}`
+  form) trigger a stdin prompt instead of erroring; references that have a default resolve to it without
+  prompting (see the `--stdin-args` design-decision entry below). The prompter trait lives in `args.rs` alongside `InteractiveStdinPrompter` (the default impl that
   reads stdin, writes prompts to stderr, and caches answers in `Mutex<HashMap>`s). `Arc` cloning shares the
   cache, so the prompter propagates through `@target` calls (via `RunnerDependencyResolver::run_dependency`,
   which clones `parent.stdin_prompter`) without re-asking the user. Tests use a mock `StdinPrompter` to script
@@ -918,20 +919,29 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   autocomplete.
 - Substitution (`{{ ARG.key }}` without default) is a hard error, not silent empty string. This catches mistakes. Use
   `{{ ARG.key ? }}` for intentional optional-with-empty-default.
-- `--stdin-args` (top-level CLI flag, like `--dry-run`): when set, missing `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}`
-  references prompt the user via stdin instead of erroring. The prompt key is the FIRST `ARG.*` / `ENV.*` segment in
-  the chain (the user-facing "primary name"); the chain's literal default (if any) is shown in `[brackets]`. A
-  non-empty answer overrides the chain; an empty answer (just Enter) falls through to the default — or to the
-  existing `MissingArg`/`MissingEnv` error if no default exists. Bare `{{ ARGS }}` (positional args) is also
-  prompted under the same flag: when the sentinel appears in the substituted template and the remaining
-  positional args would resolve to an empty string, [`RunArgs::resolve_args_sentinel`] prompts with key
-  `"ARGS"`. This covers targets like `bump` whose `match` value is `{{ ARGS }}` — without the prompt, `match`
-  would resolve to `""` and surface `MatchNoCase` immediately. The prompter cache (key `"ARGS"`) ensures the
-  user is asked at most once per run; the redacted-logging pass reuses the cached answer. `VAR.*` and `RUN.*` are NEVER prompted (they're
-  runtime context, not user input). `FLAG.x` prompts as `pass --x? (y/N)` and accepts `y`/`yes`/`true`/`1` as
-  presence. Answers are cached per (kind, key) so the same value is asked at most once per run, even across
-  `@target` invocations (the `Arc<dyn StdinPrompter>` is propagated through `RunnerDependencyResolver`). Works with
-  `--dry-run` too (the dry-run path also goes through `RunArgs::substitute`).
+- `--stdin-args` (top-level CLI flag, like `--dry-run`): when set, prompts the user via stdin for
+  **genuinely-missing** `{{ ARG.x }}` / `{{ ENV.X }}` / `{{ FLAG.x }}` inputs instead of erroring — i.e. only
+  references that have NO default and don't otherwise resolve. **A chain that reaches a literal default
+  (`{{ ARG.x ? 'y' }}`, or the empty-string default `{{ ARG.x ? }}`) is resolved to that default WITHOUT
+  prompting** — the literal-default branch of `resolve_chain_impl` `return`s before any prompt; the user's
+  earlier behavior of "prompt even when a default exists, showing it in `[brackets]`" was removed. The prompt
+  key is the FIRST `ARG.*` / `ENV.*` segment in the chain (the user-facing "primary name"). A non-empty answer
+  is used; an empty answer (just Enter) surfaces the existing `MissingArg`/`MissingEnv` error. Because prompts
+  now fire only for no-default values, the `[brackets]` / `[empty]` default-hint is gone — `prompt_value` no
+  longer takes a `default` param and the prompt always shows `(required)`. Bare `{{ ARGS }}` (positional args)
+  is still prompted under the same flag: when the sentinel appears in the substituted template and the
+  remaining positional args would resolve to an empty string, [`RunArgs::resolve_args_sentinel`] prompts with
+  key `"ARGS"` (there's no default mechanism for positional args). This covers targets like `bump` whose
+  `match` value is `{{ ARGS }}` — without the prompt, `match` would resolve to `""` and surface `MatchNoCase`
+  immediately. The prompter cache (key `"ARGS"`) ensures the user is asked at most once per run; the
+  redacted-logging pass reuses the cached answer. `VAR.*` and `RUN.*` are NEVER prompted (they're runtime
+  context, not user input). **Flags: only the bare boolean form `{{ FLAG.x }}` (no ternary / value part) is
+  prompted** as `pass --x? (y/N)` (accepts `y`/`yes`/`true`/`1` as presence) — the ternary / value forms
+  (`{{ FLAG.x ? 'a' : 'b' }}`, `{{ FLAG.x ? 'v' }}`) carry their own default (the false branch / empty) and
+  resolve without prompting (gated on `ternary_part.is_none()` in `resolve_flag`). Answers are cached per
+  (kind, key) so the same value is asked at most once per run, even across `@target` invocations (the
+  `Arc<dyn StdinPrompter>` is propagated through `RunnerDependencyResolver`). Works with `--dry-run` too (the
+  dry-run path also goes through `RunArgs::substitute`).
 - Runtime context substitutions: `{{ RUN.os }}` / `{{ RUN.arch }}` / `{{ RUN.shell }}` / `{{ RUN.cwd }}` /
   `{{ RUN.file }}` / `{{ RUN.parent }}` expose runtime info so users can write inline `if` conditions for
   cross-platform branching (e.g. `"if": "{{ RUN.os }} == windows"`) or reference paths in env values,

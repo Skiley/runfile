@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 struct MockPrompter {
 	value_answers: Mutex<HashMap<String, Option<String>>>,
 	flag_answers: Mutex<HashMap<String, bool>>,
-	value_calls: Mutex<Vec<(String, Option<String>)>>,
+	value_calls: Mutex<Vec<String>>,
 	flag_calls: Mutex<Vec<String>>,
 }
 
@@ -26,11 +26,8 @@ impl MockPrompter {
 }
 
 impl StdinPrompter for MockPrompter {
-	fn prompt_value(&self, key: &str, default: Option<&str>) -> Option<String> {
-		self.value_calls
-			.lock()
-			.unwrap()
-			.push((key.to_string(), default.map(|s| s.to_string())));
+	fn prompt_value(&self, key: &str) -> Option<String> {
+		self.value_calls.lock().unwrap().push(key.to_string());
 		self.value_answers.lock().unwrap().get(key).cloned().unwrap_or(None)
 	}
 	fn prompt_flag(&self, key: &str) -> bool {
@@ -51,30 +48,31 @@ fn missing_args_prompts_and_uses_answer() {
 	assert_eq!(result, "hello alice");
 	let calls = prompter.value_calls.lock().unwrap();
 	assert_eq!(calls.len(), 1);
-	assert_eq!(calls[0], ("ARG.name".to_string(), None));
+	assert_eq!(calls[0], "ARG.name");
 }
 
 #[test]
-fn missing_args_with_default_prompts_and_falls_through_when_empty() {
-	// Empty answer (None) should fall through to the literal default.
-	let prompter = Arc::new(MockPrompter::default().with_value("ARG.env", None));
+fn arg_with_default_uses_default_without_prompting() {
+	// A chain with a literal default resolves to that default WITHOUT
+	// prompting — even when an answer is scripted, it is never consulted.
+	let prompter = Arc::new(MockPrompter::default().with_value("ARG.env", Some("staging")));
 	let args = args_with(prompter.clone());
 	let result = args
 		.substitute("env={{ ARG.env ? 'production' }}", &HashMap::new())
 		.unwrap();
 	assert_eq!(result, "env=production");
-	let calls = prompter.value_calls.lock().unwrap();
-	assert_eq!(calls[0], ("ARG.env".to_string(), Some("production".to_string())));
+	assert!(prompter.value_calls.lock().unwrap().is_empty());
 }
 
 #[test]
-fn missing_args_with_default_prompts_and_overrides_when_provided() {
+fn arg_with_empty_default_uses_empty_without_prompting() {
+	// The trailing `?` empty-string default also counts as a default, so it
+	// short-circuits the prompt.
 	let prompter = Arc::new(MockPrompter::default().with_value("ARG.env", Some("staging")));
-	let args = args_with(prompter);
-	let result = args
-		.substitute("env={{ ARG.env ? 'production' }}", &HashMap::new())
-		.unwrap();
-	assert_eq!(result, "env=staging");
+	let args = args_with(prompter.clone());
+	let result = args.substitute("env={{ ARG.env ? }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "env=");
+	assert!(prompter.value_calls.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -106,7 +104,7 @@ fn missing_positional_args_prompts_for_bare_args() {
 	assert_eq!(result, "part=major");
 	let calls = prompter.value_calls.lock().unwrap();
 	assert_eq!(calls.len(), 1);
-	assert_eq!(calls[0], ("ARGS".to_string(), None));
+	assert_eq!(calls[0], "ARGS");
 }
 
 #[test]
@@ -148,31 +146,64 @@ fn provided_env_skips_prompt() {
 }
 
 #[test]
-fn chain_args_to_env_to_default_prompts_once_with_first_source_key() {
-	// `{{ ARG.x ? ENV.X ? 'fallback' }}` — neither set, prompt key is
-	// the first source (ARG.x), default is "fallback".
+fn chain_with_default_uses_default_without_prompting() {
+	// `{{ ARG.x ? ENV.X ? 'fallback' }}` — neither source set, but the chain
+	// has a literal default, so it resolves to 'fallback' without prompting.
 	let prompter = Arc::new(MockPrompter::default().with_value("ARG.x", Some("entered")));
 	let args = args_with(prompter.clone());
 	let result = args
 		.substitute("v={{ ARG.x ? ENV.X ? 'fallback' }}", &HashMap::new())
 		.unwrap();
-	assert_eq!(result, "v=entered");
-	let calls = prompter.value_calls.lock().unwrap();
-	assert_eq!(calls.len(), 1);
-	assert_eq!(calls[0], ("ARG.x".to_string(), Some("fallback".to_string())));
+	assert_eq!(result, "v=fallback");
+	assert!(prompter.value_calls.lock().unwrap().is_empty());
 }
 
 #[test]
-fn flags_missing_prompts_for_presence() {
+fn chain_without_default_prompts_once_with_first_source_key() {
+	// `{{ ARG.x ? ENV.X }}` — neither source set and no literal default, so
+	// the user IS prompted, keyed on the first source (ARG.x).
+	let prompter = Arc::new(MockPrompter::default().with_value("ARG.x", Some("entered")));
+	let args = args_with(prompter.clone());
+	let result = args.substitute("v={{ ARG.x ? ENV.X }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "v=entered");
+	let calls = prompter.value_calls.lock().unwrap();
+	assert_eq!(calls.len(), 1);
+	assert_eq!(calls[0], "ARG.x");
+}
+
+#[test]
+fn bare_flag_boolean_prompts_for_presence() {
+	// The bare boolean form `{{ FLAG.x }}` has no explicit default, so it IS
+	// prompted (y/N) under --stdin-args.
+	let prompter = Arc::new(MockPrompter::default().with_flag("--verbose", true));
+	let args = args_with(prompter.clone());
+	let result = args.substitute("v={{ FLAG.verbose }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "v=true");
+	let calls = prompter.flag_calls.lock().unwrap();
+	assert_eq!(calls.len(), 1);
+	assert_eq!(calls[0], "--verbose");
+}
+
+#[test]
+fn bare_flag_boolean_declined_returns_false() {
+	let prompter = Arc::new(MockPrompter::default().with_flag("--verbose", false));
+	let args = args_with(prompter);
+	let result = args.substitute("v={{ FLAG.verbose }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "v=false");
+}
+
+#[test]
+fn flag_ternary_absent_uses_false_branch_without_prompting() {
+	// The ternary form carries its own default (the false branch), so an
+	// absent flag resolves to that branch without prompting — the scripted
+	// "present" answer is never consulted.
 	let prompter = Arc::new(MockPrompter::default().with_flag("--verbose", true));
 	let args = args_with(prompter.clone());
 	let result = args
 		.substitute("cmd {{ FLAG.verbose ? '-v' : }}", &HashMap::new())
 		.unwrap();
-	assert_eq!(result, "cmd -v");
-	let calls = prompter.flag_calls.lock().unwrap();
-	assert_eq!(calls.len(), 1);
-	assert_eq!(calls[0], "--verbose");
+	assert_eq!(result, "cmd ");
+	assert!(prompter.flag_calls.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -187,9 +218,11 @@ fn flags_provided_skips_prompt() {
 }
 
 #[test]
-fn flags_user_declines_returns_false_branch() {
-	let prompter = Arc::new(MockPrompter::default().with_flag("--release", false));
-	let args = args_with(prompter);
+fn flag_ternary_absent_uses_explicit_false_branch() {
+	// Even with a scripted "present" answer, the ternary form does not prompt;
+	// the absent flag selects the explicit false branch.
+	let prompter = Arc::new(MockPrompter::default().with_flag("--release", true));
+	let args = args_with(prompter.clone());
 	let result = args
 		.substitute(
 			"cargo build {{ FLAG.release ? '--release' : '--debug' }}",
@@ -197,6 +230,7 @@ fn flags_user_declines_returns_false_branch() {
 		)
 		.unwrap();
 	assert_eq!(result, "cargo build --debug");
+	assert!(prompter.flag_calls.lock().unwrap().is_empty());
 }
 
 #[test]
