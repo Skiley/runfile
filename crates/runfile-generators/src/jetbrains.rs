@@ -72,6 +72,22 @@ pub fn check_existing_jetbrains_config(contents: &str, expected_name: &str, targ
 	JetBrainsConfigCheck::Ours
 }
 
+/// Decide whether an arbitrary `.run.xml` file in the run-configs directory was generated
+/// by us, without needing to know which target it was generated for.
+///
+/// Used by `:generate jetbrains-run-configurations` to prune stale files (targets that no
+/// longer exist in the Runfile) without touching user-authored configurations. Anchored on
+/// three structural markers our generator always emits together: a `ShConfigurationType`
+/// configuration, a `SCRIPT_TEXT` that runs the `run` binary (covers both the current
+/// `run --stdin-args <target>` and the legacy `run <target>` forms — the leading
+/// `value="run ` prefix is shared), and our distinctive `SCRIPT_WORKING_DIRECTORY` value.
+/// User-written XML in `.run/` would have to coincidentally hit all three to be flagged.
+pub fn is_jetbrains_config_ours(contents: &str) -> bool {
+	contents.contains("type=\"ShConfigurationType\"")
+		&& contents.contains("name=\"SCRIPT_TEXT\" value=\"run ")
+		&& contents.contains("name=\"SCRIPT_WORKING_DIRECTORY\" value=\"$PROJECT_DIR$\"")
+}
+
 /// Convert a target name into a human-friendly run configuration title.
 ///
 /// Non-alphanumeric characters become whitespace boundaries, then each resulting word is capitalized.

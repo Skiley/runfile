@@ -1,6 +1,6 @@
 use runfile_parser::{is_internal_target_name, CommandSpec, Runfile};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A single Zed task definition (subset of fields we care about).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +22,8 @@ pub struct ZedTask {
 pub struct ZedMergeResult {
 	pub added: Vec<String>,
 	pub updated: Vec<String>,
+	/// Labels of stale tasks that looked like ours but no longer correspond to a Runfile target.
+	pub removed: Vec<String>,
 }
 
 /// Generate Zed tasks for all targets in a Runfile.
@@ -50,8 +52,25 @@ pub fn generate_zed_tasks(runfile: &Runfile) -> Vec<ZedTask> {
 
 /// Merge generated tasks into an existing task list.
 /// Existing tasks with matching labels are updated in place (preserving extra fields).
+/// Stale tasks that look like ones we generated (via [`is_zed_task_ours`]) but are no
+/// longer in the generated set are pruned, so retired Runfile targets stop leaving zombie
+/// entries in `.zed/tasks.json`. User-authored tasks that don't pass the ownership check
+/// are left untouched.
 /// New tasks are appended.
 pub fn merge_zed_tasks(existing: &mut Vec<ZedTask>, generated: Vec<ZedTask>) -> ZedMergeResult {
+	let generated_labels: HashSet<&str> = generated.iter().map(|t| t.label.as_str()).collect();
+
+	let mut removed = Vec::new();
+	let mut kept = Vec::with_capacity(existing.len());
+	for task in existing.drain(..) {
+		if is_zed_task_ours(&task) && !generated_labels.contains(task.label.as_str()) {
+			removed.push(task.label.clone());
+		} else {
+			kept.push(task);
+		}
+	}
+	*existing = kept;
+
 	let mut existing_labels: HashMap<String, usize> = HashMap::new();
 	for (i, task) in existing.iter().enumerate() {
 		existing_labels.insert(task.label.clone(), i);
@@ -74,7 +93,34 @@ pub fn merge_zed_tasks(existing: &mut Vec<ZedTask>, generated: Vec<ZedTask>) -> 
 		}
 	}
 
-	ZedMergeResult { added, updated }
+	ZedMergeResult {
+		added,
+		updated,
+		removed,
+	}
+}
+
+/// Decide whether an existing task is one we'd have generated for the same target.
+///
+/// Matches both the current invocation shape (`["--stdin-args", "<target>", ...]`) and the
+/// pre-`--stdin-args` shape (`["<target>", ...]`) so we recognise our own historical output.
+/// Anchored on `command == "run"` plus `label == format!("run {target}")` plus the target
+/// name appearing as the expected arg — tight enough that hand-authored tasks with custom
+/// commands or mismatched labels won't be flagged as ours.
+fn is_zed_task_ours(task: &ZedTask) -> bool {
+	if task.command != "run" {
+		return false;
+	}
+	let Some(target) = task.label.strip_prefix("run ") else {
+		return false;
+	};
+	if task.args.len() >= 2 && task.args[0] == "--stdin-args" && task.args[1] == target {
+		return true;
+	}
+	if !task.args.is_empty() && task.args[0] == target {
+		return true;
+	}
+	false
 }
 
 fn build_zed_task(label: &str, target_name: &str, spec: &CommandSpec) -> ZedTask {

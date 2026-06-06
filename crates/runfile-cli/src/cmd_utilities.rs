@@ -225,7 +225,7 @@ pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>) {
 	let generated = generate_vscode_tasks(&runfile);
 	let result = merge_vscode_tasks(&mut existing, generated);
 
-	if result.updated.is_empty() && result.added.is_empty() {
+	if result.updated.is_empty() && result.added.is_empty() && result.removed.is_empty() {
 		println!("No tasks to generate.");
 		return;
 	}
@@ -262,6 +262,13 @@ pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>) {
 			println!("    {label}");
 		}
 	}
+	if !result.removed.is_empty() {
+		println!();
+		println!("  Removed:");
+		for label in &result.removed {
+			println!("    {label}");
+		}
+	}
 }
 
 pub fn cmd_generate_zed_tasks(file: Option<&std::path::Path>) {
@@ -295,7 +302,7 @@ pub fn cmd_generate_zed_tasks(file: Option<&std::path::Path>) {
 	let generated = generate_zed_tasks(&runfile);
 	let result = merge_zed_tasks(&mut existing_tasks, generated);
 
-	if result.updated.is_empty() && result.added.is_empty() {
+	if result.updated.is_empty() && result.added.is_empty() && result.removed.is_empty() {
 		println!("No tasks to generate.");
 		return;
 	}
@@ -332,10 +339,20 @@ pub fn cmd_generate_zed_tasks(file: Option<&std::path::Path>) {
 			println!("    {label}");
 		}
 	}
+	if !result.removed.is_empty() {
+		println!();
+		println!("  Removed:");
+		for label in &result.removed {
+			println!("    {label}");
+		}
+	}
 }
 
 pub fn cmd_generate_jetbrains_run_configs(file: Option<&std::path::Path>, output_dir: Option<&std::path::Path>) {
-	use runfile_generators::{check_existing_jetbrains_config, generate_jetbrains_configs, JetBrainsConfigCheck};
+	use runfile_generators::{
+		check_existing_jetbrains_config, generate_jetbrains_configs, is_jetbrains_config_ours, JetBrainsConfigCheck,
+	};
+	use std::collections::HashSet;
 
 	let runfile_path = resolve_runfile_path(file);
 
@@ -359,6 +376,40 @@ pub fn cmd_generate_jetbrains_run_configs(file: Option<&std::path::Path>, output
 	let mut added: Vec<String> = Vec::new();
 	let mut updated: Vec<String> = Vec::new();
 	let mut skipped: Vec<(String, String)> = Vec::new();
+	let mut removed: Vec<String> = Vec::new();
+
+	// Sweep stale `Runfile_*.run.xml` files we previously emitted but whose target was
+	// removed from the Runfile. We only delete files that pass the structural ownership
+	// check, so hand-authored XML in `.run/` (even something that happens to start with
+	// `Runfile_`) is left alone.
+	let generated_file_names: HashSet<&str> = configs.iter().map(|c| c.file_name.as_str()).collect();
+	if let Ok(entries) = std::fs::read_dir(&run_dir) {
+		for entry in entries.flatten() {
+			let file_name = match entry.file_name().into_string() {
+				Ok(n) => n,
+				Err(_) => continue,
+			};
+			if !file_name.starts_with("Runfile_") || !file_name.ends_with(".run.xml") {
+				continue;
+			}
+			if generated_file_names.contains(file_name.as_str()) {
+				continue;
+			}
+			let path = entry.path();
+			let contents = match std::fs::read_to_string(&path) {
+				Ok(c) => c,
+				Err(_) => continue,
+			};
+			if !is_jetbrains_config_ours(&contents) {
+				continue;
+			}
+			std::fs::remove_file(&path).unwrap_or_else(|e| {
+				eprintln!("Error removing {}: {e}", path.display());
+				process::exit(1);
+			});
+			removed.push(file_name);
+		}
+	}
 
 	for config in &configs {
 		let file_path = run_dir.join(&config.file_name);
@@ -384,7 +435,7 @@ pub fn cmd_generate_jetbrains_run_configs(file: Option<&std::path::Path>, output
 		});
 	}
 
-	if added.is_empty() && updated.is_empty() && skipped.is_empty() {
+	if added.is_empty() && updated.is_empty() && skipped.is_empty() && removed.is_empty() {
 		println!("No run configurations to generate.");
 		return;
 	}
@@ -401,6 +452,13 @@ pub fn cmd_generate_jetbrains_run_configs(file: Option<&std::path::Path>, output
 		println!();
 		println!("  Updated:");
 		for label in &updated {
+			println!("    {label}");
+		}
+	}
+	if !removed.is_empty() {
+		println!();
+		println!("  Removed:");
+		for label in &removed {
 			println!("    {label}");
 		}
 	}

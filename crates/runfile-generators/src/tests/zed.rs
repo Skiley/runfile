@@ -90,6 +90,110 @@ fn zed_merge_updates_existing_preserves_extra() {
 }
 
 #[test]
+fn zed_merge_prunes_stale_ours_entries() {
+	let mut existing = vec![
+		ZedTask {
+			label: "run dead".into(),
+			command: "run".into(),
+			args: vec!["--stdin-args".into(), "dead".into()],
+			cwd: Some("$ZED_WORKTREE_ROOT".into()),
+			allow_concurrent_runs: None,
+			extra: serde_json::Map::new(),
+		},
+		ZedTask {
+			label: "run build".into(),
+			command: "run".into(),
+			args: vec!["--stdin-args".into(), "build".into()],
+			cwd: Some("$ZED_WORKTREE_ROOT".into()),
+			allow_concurrent_runs: None,
+			extra: serde_json::Map::new(),
+		},
+	];
+	let generated = vec![ZedTask {
+		label: "run build".into(),
+		command: "run".into(),
+		args: vec!["--stdin-args".into(), "build".into()],
+		cwd: Some("$ZED_WORKTREE_ROOT".into()),
+		allow_concurrent_runs: None,
+		extra: serde_json::Map::new(),
+	}];
+	let result = merge_zed_tasks(&mut existing, generated);
+	assert_eq!(result.removed, vec!["run dead"]);
+	assert_eq!(result.updated, vec!["run build"]);
+	assert!(result.added.is_empty());
+	let labels: Vec<&str> = existing.iter().map(|t| t.label.as_str()).collect();
+	assert_eq!(labels, vec!["run build"]);
+}
+
+#[test]
+fn zed_merge_prunes_legacy_ours_entries() {
+	let mut existing = vec![ZedTask {
+		label: "run legacy".into(),
+		command: "run".into(),
+		args: vec!["legacy".into()],
+		cwd: None,
+		allow_concurrent_runs: None,
+		extra: serde_json::Map::new(),
+	}];
+	let generated = vec![ZedTask {
+		label: "run build".into(),
+		command: "run".into(),
+		args: vec!["--stdin-args".into(), "build".into()],
+		cwd: Some("$ZED_WORKTREE_ROOT".into()),
+		allow_concurrent_runs: None,
+		extra: serde_json::Map::new(),
+	}];
+	let result = merge_zed_tasks(&mut existing, generated);
+	assert_eq!(result.removed, vec!["run legacy"]);
+	assert_eq!(result.added, vec!["run build"]);
+}
+
+#[test]
+fn zed_merge_preserves_foreign_entries() {
+	let mut existing = vec![
+		// Different command — not ours.
+		ZedTask {
+			label: "run thing".into(),
+			command: "make".into(),
+			args: vec!["thing".into()],
+			cwd: None,
+			allow_concurrent_runs: None,
+			extra: serde_json::Map::new(),
+		},
+		// Label doesn't fit our `run <target>` convention.
+		ZedTask {
+			label: "custom".into(),
+			command: "run".into(),
+			args: vec!["--stdin-args".into(), "custom".into()],
+			cwd: None,
+			allow_concurrent_runs: None,
+			extra: serde_json::Map::new(),
+		},
+		// Args[1] != label suffix — likely user-edited; not ours.
+		ZedTask {
+			label: "run foo".into(),
+			command: "run".into(),
+			args: vec!["--stdin-args".into(), "bar".into()],
+			cwd: None,
+			allow_concurrent_runs: None,
+			extra: serde_json::Map::new(),
+		},
+	];
+	let generated = vec![ZedTask {
+		label: "run build".into(),
+		command: "run".into(),
+		args: vec!["--stdin-args".into(), "build".into()],
+		cwd: Some("$ZED_WORKTREE_ROOT".into()),
+		allow_concurrent_runs: None,
+		extra: serde_json::Map::new(),
+	}];
+	let result = merge_zed_tasks(&mut existing, generated);
+	assert!(result.removed.is_empty());
+	assert_eq!(result.added, vec!["run build"]);
+	assert_eq!(existing.len(), 4);
+}
+
+#[test]
 fn zed_merge_mixed_add_and_update() {
 	let mut existing = vec![ZedTask {
 		label: "run build".into(),

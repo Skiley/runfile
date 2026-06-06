@@ -118,6 +118,55 @@ fn jetbrains_check_foreign_script() {
 }
 
 #[test]
+fn jetbrains_is_ours_recognises_current_format() {
+	let runfile = make_runfile(vec![("build", vec!["cargo build"])]);
+	let xml = &generate_jetbrains_configs(&runfile)[0].xml;
+	assert!(is_jetbrains_config_ours(xml));
+}
+
+#[test]
+fn jetbrains_is_ours_recognises_legacy_run_form() {
+	// Pre-`--stdin-args` files only had `value="run <target>"`.
+	let xml = r#"<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Build" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="run build" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+  </configuration>
+</component>"#;
+	assert!(is_jetbrains_config_ours(xml));
+}
+
+#[test]
+fn jetbrains_is_ours_rejects_foreign_type() {
+	// Right command in script, wrong configuration type — likely a hand-written config.
+	let xml = r#"<configuration default="false" name="Build" type="MavenRunConfiguration">
+    <option name="SCRIPT_TEXT" value="run build" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+</configuration>"#;
+	assert!(!is_jetbrains_config_ours(xml));
+}
+
+#[test]
+fn jetbrains_is_ours_rejects_foreign_script() {
+	// Shell config but not invoking `run`.
+	let xml = r#"<configuration default="false" name="Build" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="make build" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+</configuration>"#;
+	assert!(!is_jetbrains_config_ours(xml));
+}
+
+#[test]
+fn jetbrains_is_ours_rejects_missing_working_directory_marker() {
+	// Shell config + run script, but without our distinctive `$PROJECT_DIR$` marker —
+	// a hand-authored config that happens to invoke `run`.
+	let xml = r#"<configuration default="false" name="Build" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="run build" />
+</configuration>"#;
+	assert!(!is_jetbrains_config_ours(xml));
+}
+
+#[test]
 fn jetbrains_xml_is_valid_structure() {
 	let runfile = make_runfile(vec![("test", vec!["cargo test"])]);
 	let configs = generate_jetbrains_configs(&runfile);

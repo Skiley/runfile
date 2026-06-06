@@ -1159,6 +1159,25 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   default Run/Services tool window) — do NOT flip it to `true`. `check_existing_jetbrains_config` accepts both
   the current `run --stdin-args <target>` form and the legacy `run <target>` form so older configs upgrade in
   place.
+- **Stale-entry pruning across all three editor generators.** Re-running a `:generate <editor>` command after a
+  target is renamed or removed deletes the now-orphan entry/file instead of leaving zombies behind. The
+  ownership check is structural so hand-authored entries are never touched:
+  - VS Code (`merge_vscode_tasks`) / Zed (`merge_zed_tasks`): the private `is_vscode_task_ours` /
+    `is_zed_task_ours` predicate matches `command == "run"` AND
+    `label == format!("run {target}")` AND either the current `["--stdin-args", target, ...]` arg shape OR
+    the pre-`--stdin-args` legacy shape `[target, ...]`. Any existing task that passes the predicate but isn't
+    in the new generated set is removed. The merge result carries a third `removed: Vec<String>` field
+    alongside `added` / `updated`; the CLI reports it under a "Removed:" section and the `:generate` "nothing
+    to do" early-return now also requires `removed.is_empty()`.
+  - JetBrains: public `is_jetbrains_config_ours(contents: &str) -> bool` (in `jetbrains.rs`) anchors on three
+    markers our generator always emits together: `type="ShConfigurationType"` + `SCRIPT_TEXT" value="run ` (the
+    shared prefix of both current `run --stdin-args …` and legacy `run …` forms) + our distinctive
+    `SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$"`. The CLI (`cmd_generate_jetbrains_run_configs`) scans
+    `.run/` for `Runfile_*.run.xml` files not in the generated `file_name` set; for each it reads the file and
+    calls `is_jetbrains_config_ours` before deleting. User-written XML in `.run/` (even something accidentally
+    matching the filename pattern) is left alone unless all three markers are present. The "Removed:"
+    section prints alongside "Added" / "Updated" / "Skipped"; the no-op early-return also gates on
+    `removed.is_empty()`.
 
 ## Testing Requirements
 

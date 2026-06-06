@@ -41,4 +41,5 @@ mod exclude_metadata;
 mod internal_targets;
 mod jetbrains;
 mod stdin_args;
+mod vscode;
 mod zed;

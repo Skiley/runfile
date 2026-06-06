@@ -1,6 +1,6 @@
 use runfile_parser::{is_internal_target_name, CommandSpec, Runfile};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The top-level VS Code tasks.json structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +39,8 @@ pub struct VsCodeTaskPresentation {
 pub struct VsCodeMergeResult {
 	pub added: Vec<String>,
 	pub updated: Vec<String>,
+	/// Labels of stale tasks that looked like ours but no longer correspond to a Runfile target.
+	pub removed: Vec<String>,
 }
 
 /// Generate VS Code tasks for all targets in a Runfile.
@@ -67,8 +69,25 @@ pub fn generate_vscode_tasks(runfile: &Runfile) -> Vec<VsCodeTask> {
 
 /// Merge generated tasks into an existing tasks file.
 /// Existing tasks with matching labels are updated in place (preserving extra fields).
+/// Stale tasks that look like ones we generated (via [`is_vscode_task_ours`]) but are no
+/// longer in the generated set are pruned, so retired Runfile targets stop leaving zombie
+/// entries in `.vscode/tasks.json`. User-authored tasks that don't pass the ownership
+/// check are left untouched.
 /// New tasks are appended.
 pub fn merge_vscode_tasks(existing: &mut VsCodeTasksFile, generated: Vec<VsCodeTask>) -> VsCodeMergeResult {
+	let generated_labels: HashSet<&str> = generated.iter().map(|t| t.label.as_str()).collect();
+
+	let mut removed = Vec::new();
+	let mut kept = Vec::with_capacity(existing.tasks.len());
+	for task in existing.tasks.drain(..) {
+		if is_vscode_task_ours(&task) && !generated_labels.contains(task.label.as_str()) {
+			removed.push(task.label.clone());
+		} else {
+			kept.push(task);
+		}
+	}
+	existing.tasks = kept;
+
 	let mut existing_labels: HashMap<String, usize> = HashMap::new();
 	for (i, task) in existing.tasks.iter().enumerate() {
 		existing_labels.insert(task.label.clone(), i);
@@ -91,7 +110,34 @@ pub fn merge_vscode_tasks(existing: &mut VsCodeTasksFile, generated: Vec<VsCodeT
 		}
 	}
 
-	VsCodeMergeResult { added, updated }
+	VsCodeMergeResult {
+		added,
+		updated,
+		removed,
+	}
+}
+
+/// Decide whether an existing task is one we'd have generated for the same target.
+///
+/// Matches both the current invocation shape (`["--stdin-args", "<target>", ...]`) and the
+/// pre-`--stdin-args` shape (`["<target>", ...]`) so we recognise our own historical output.
+/// The check anchors on `command == "run"` plus `label == format!("run {target}")` plus the
+/// target name appearing as the expected arg — tight enough that hand-authored tasks with
+/// custom commands or mismatched labels won't be flagged as ours.
+fn is_vscode_task_ours(task: &VsCodeTask) -> bool {
+	if task.command != "run" {
+		return false;
+	}
+	let Some(target) = task.label.strip_prefix("run ") else {
+		return false;
+	};
+	if task.args.len() >= 2 && task.args[0] == "--stdin-args" && task.args[1] == target {
+		return true;
+	}
+	if !task.args.is_empty() && task.args[0] == target {
+		return true;
+	}
+	false
 }
 
 fn build_vscode_task(label: &str, target_name: &str, spec: &CommandSpec) -> VsCodeTask {

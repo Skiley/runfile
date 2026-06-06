@@ -53,9 +53,11 @@ fn zed_merge_empty_lists() {
 
 #[test]
 fn zed_merge_no_overlap() {
+	// User-authored task (different `command`) — must NOT be flagged as ours by
+	// `is_zed_task_ours`, so it survives the stale-prune pass and the new task is appended.
 	let mut existing = vec![ZedTask {
-		label: "run build".into(),
-		command: "run".into(),
+		label: "user task".into(),
+		command: "make".into(),
 		args: vec!["build".into()],
 		cwd: None,
 		allow_concurrent_runs: None,
@@ -72,6 +74,7 @@ fn zed_merge_no_overlap() {
 	let result = merge_zed_tasks(&mut existing, generated);
 	assert_eq!(result.added, vec!["run test"]);
 	assert!(result.updated.is_empty());
+	assert!(result.removed.is_empty());
 	assert_eq!(existing.len(), 2);
 }
 
