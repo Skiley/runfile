@@ -443,6 +443,19 @@ crates/
   same pattern as `define` / `set_cwd` / `capture`; IO failure surfaces as [`SubstitutionError::WriteFileError`]),
   `file_exists(path)` (`"true"` / `"false"`, same path resolution as `read_file`; permission errors fold to
   `"false"` — use `try(read_file(p))` to distinguish "missing" from "unreadable"),
+  `temp_file([content], [extension])` (create a fresh file in the OS temp dir — `std::env::temp_dir()` — named
+  `runfile-<uuid>`, write `content` into it if given, and append `.<extension>` if given (a leading dot on the
+  extension arg is stripped, so `'json'` and `'.json'` both yield `…​.json`); returns the absolute path. Arity is
+  0/1/2 (more → `FunctionArity`). Registered for deletion at CLI exit via the process-global registry in
+  `functions.rs` — see "**`temp_file` / `temp_dir` cleanup**" below. Non-deterministic + side-effecting, so it
+  follows the `uuid` / `capture` / `write_file` pattern: `args.dry_run` AND the `redact_env` log pass both return the
+  placeholder `<temp_file>` and create NOTHING (the redact skip is what keeps the back-to-back log substitution from
+  spawning a second, orphaned temp file — there's no per-callsite memoization, so each real substitution pass creates
+  exactly one file; reuse a single file by capturing it with `define`). Write failure surfaces as
+  [`SubstitutionError::TempFileError`]),
+  `temp_dir()` (0 args; create a fresh empty directory `runfile-<uuid>` in the OS temp dir, registered for recursive
+  deletion at CLI exit; same `dry_run` / `redact_env` placeholder rule as `temp_file`, returning `<temp_dir>`;
+  creation failure surfaces as [`SubstitutionError::TempDirError`]),
   `json_get(json, path)` (parse `json` and extract the value at the dotted `path`; numeric segments are
   array indices, e.g. `users.0.name`; missing paths return `""`; strings come back unquoted, scalars use
   their canonical text repr, objects/arrays serialize back to compact JSON; malformed JSON / paths surface
@@ -525,7 +538,8 @@ crates/
   `CaptureFailed { command, message }` (`capture` shell exited non-zero, failed to spawn, or
   produced non-UTF-8 stdout),
   `ReadFileError(path, msg)`, `WriteFileError(path, msg)` (`write_file` could not write — bad
-  directory, permissions, etc.), `InvalidJson(name, msg)`, `InvalidJsonPath(path, msg)`,
+  directory, permissions, etc.), `TempFileError(msg)` / `TempDirError(msg)` (`temp_file` / `temp_dir`
+  could not create the artifact), `InvalidJson(name, msg)`, `InvalidJsonPath(path, msg)`,
   `InvalidTimeFormat(format)` (`now` got an unknown format), `InvalidUrlEncoding(input)` (`url_decode` bad
   `%XX`), `UserError(msg)` (`error(...)` — soft command failure, see below),
   `UnbalancedParens`, `BarewordLiteralNotAllowed`, plus `MalformedSubstitution` for arg-list whitespace violations.
@@ -648,6 +662,24 @@ crates/
   so `[parallel]` runs don't show inflated totals either; the counter is now threaded through the collector for
   this. `extract_target_with_cwd` skips them in dry-run output so a `define`-only line doesn't show up as a blank
   line.
+- **`temp_file` / `temp_dir` cleanup**: artifacts created by these two functions are tracked in a **process-global
+  registry** — `static TEMP_ARTIFACTS: Mutex<Vec<TempArtifact>>` in `functions.rs` (each entry is a `path` + an
+  `is_dir` flag). A global static (rather than per-`RunArgs` state) is the right shape for two reasons: (1) the CLI
+  tears down via `std::process::exit`, which skips destructors, so cleanup must be an *explicit* call — a global is
+  the simplest thing the CLI can reach without plumbing the registry back out of the executor; (2) `temp_file` runs
+  deep inside substitution, far from any one `RunArgs` lifetime, and the same registry must cover artifacts from
+  `@target` children, parallel worker threads, and watch-mode re-runs alike. `pub fn cleanup_temp_artifacts()`
+  (re-exported from `lib.rs`) drains the registry and best-effort-deletes every path (`remove_file` /
+  `remove_dir_all`; missing/permission errors ignored). The CLI calls it in `cmd_run.rs` right before **both**
+  `process::exit` paths (success and the `Err` arm) and **after each watch-mode iteration** (so a long-lived
+  `run --watch`-style session doesn't accumulate artifacts). `--dry-run` (`cmd_dry_run`) never wires cleanup because
+  the dry-run pass creates nothing. **Caveat:** a hard kill (SIGKILL) or a Ctrl+C that terminates before the run
+  completes skips cleanup — those leftover artifacts stay in the OS temp dir for the OS to reclaim. No SIGINT handler
+  is installed for this (it would entangle with `force_kill.rs`'s conditional SIGINT machinery and require
+  async-signal-safe deletion); normal success/failure exit is the guaranteed cleanup path. Tests that exercise these
+  functions serialize on a dedicated lock (`TEMP_TEST_LOCK` in `tests/functions.rs`) because the shared global
+  registry means one test's `cleanup_temp_artifacts()` drain would otherwise race a sibling test's create→assert
+  window.
 - **`FLAG.x` in chain segments and function args**: `resolve_chain_impl` recognises `FLAG.<key>` as a value source
   returning `"true"`/`"false"` (boolean form only — the ternary form's ` : ` would conflict with chain semantics).
   Inside a function arg, `evaluate_arg` routes `FLAG.x [? a [: b]]` to the dedicated FLAGS resolver so the full

@@ -277,7 +277,7 @@ and work as full substitution bodies *or* as chain segments:
   //   encoding  : base64_encode, base64_decode, url_encode, url_decode
   //   hashing   : sha256, md5
   //   ids/time  : uuid, now
-  //   files     : read_file, write_file, file_exists
+  //   files     : read_file, write_file, file_exists, temp_file, temp_dir
   //   json      : json_get, json_set
   //   control   : try, error
   //   shell     : shell_quote, capture
@@ -381,6 +381,17 @@ and work as full substitution bodies *or* as chain segments:
   // quotes, embedded newlines, anything that would break a
   // `printf > file`-style redirect on Windows. `--dry-run` skips the write.
   "{{ write_file('build.gradle.kts', regex_replace(read_file('build.gradle.kts'), 'versionCode = [0-9]+', 'versionCode = 43')) }}",
+
+  // Create a temp file / dir in the OS temp directory, auto-deleted when the
+  // CLI exits. `temp_file([content], [extension])` writes `content` (if given)
+  // and appends `.<extension>` (leading dot optional); `temp_dir()` makes an
+  // empty directory (removed recursively). `--dry-run` → `<temp_file>` /
+  // `<temp_dir>` placeholders, nothing created. Capture the path once with
+  // `define` and reuse it:
+  "{{ define(cfg, temp_file('{\"env\":\"prod\"}', 'json')) }}",
+  "tool --config {{ VAR.cfg }}",
+  "{{ define(work, temp_dir()) }}",
+  "git clone --depth 1 $REPO {{ VAR.work }} && build {{ VAR.work }}",
 
   // Pull values out of arbitrary JSON without `jq` (works on every shell):
   "echo db_host={{ json_get(read_file('config.json'), 'database.host') }}",

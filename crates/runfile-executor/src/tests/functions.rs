@@ -1765,6 +1765,149 @@ fn write_file_composes_with_read_and_regex() {
 	);
 }
 
+// ── temp_file() / temp_dir() ──
+
+// `temp_file` / `temp_dir` share a process-global cleanup registry, so these
+// tests must not run concurrently with one another: one test's
+// `cleanup_temp_artifacts()` drain would otherwise delete another test's
+// freshly-created artifact in the window between creation and assertion.
+// Serialize them with a dedicated lock (poison-resistant so a panic in one
+// test doesn't cascade). Other tests never touch the registry, so they're
+// unaffected and stay parallel.
+static TEMP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn temp_test_guard() -> std::sync::MutexGuard<'static, ()> {
+	TEMP_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[test]
+fn temp_file_creates_empty_file_in_os_temp_dir() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let path = args.substitute("{{ temp_file() }}", &HashMap::new()).unwrap();
+	let p = std::path::Path::new(&path);
+	assert!(p.is_file(), "temp_file() should create a real file");
+	assert!(
+		p.starts_with(std::env::temp_dir()),
+		"temp_file() should live in the OS temp dir, got {path}"
+	);
+	assert_eq!(std::fs::read_to_string(p).unwrap(), "", "no-arg temp_file is empty");
+	crate::cleanup_temp_artifacts();
+	assert!(!p.exists(), "cleanup should delete the file");
+}
+
+#[test]
+fn temp_file_writes_content() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let path = args
+		.substitute("{{ temp_file('hello world') }}", &HashMap::new())
+		.unwrap();
+	assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
+	crate::cleanup_temp_artifacts();
+}
+
+#[test]
+fn temp_file_extension_suffix_with_and_without_dot() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let a = args
+		.substitute("{{ temp_file('x', 'json') }}", &HashMap::new())
+		.unwrap();
+	let b = args
+		.substitute("{{ temp_file('x', '.json') }}", &HashMap::new())
+		.unwrap();
+	assert!(a.ends_with(".json"), "extension should append, got {a}");
+	assert!(b.ends_with(".json"), "leading dot should be stripped, got {b}");
+	assert!(!b.ends_with("..json"), "no double dot, got {b}");
+	crate::cleanup_temp_artifacts();
+}
+
+#[test]
+fn temp_file_distinct_calls_distinct_files() {
+	// No caching: each occurrence creates its own file (unlike `capture`).
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let a = args.substitute("{{ temp_file() }}", &HashMap::new()).unwrap();
+	let b = args.substitute("{{ temp_file() }}", &HashMap::new()).unwrap();
+	assert_ne!(a, b, "two temp_file() calls must yield distinct paths");
+	crate::cleanup_temp_artifacts();
+}
+
+#[test]
+fn temp_file_dry_run_creates_nothing() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]).with_dry_run(true);
+	let result = args.substitute("cat {{ temp_file('x') }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "cat <temp_file>");
+}
+
+#[test]
+fn temp_file_redacted_pass_creates_nothing() {
+	// The executor substitutes the real command then `substitute_redacted` for
+	// the log line. temp_file must skip creation on the redacted pass so the
+	// log substitution doesn't spawn a second, orphaned temp file.
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let log = args
+		.substitute_redacted("cat {{ temp_file('x') }}", &HashMap::new())
+		.unwrap();
+	assert_eq!(log, "cat <temp_file>");
+}
+
+#[test]
+fn temp_file_define_reuse_is_single_file() {
+	// Canonical pattern: capture the path once, reuse it. One file created;
+	// VAR holds the real path so subsequent reads (and logs) see it.
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	args.substitute("{{ define(cfg, temp_file('payload')) }}", &HashMap::new())
+		.unwrap();
+	let path = args.substitute("{{ VAR.cfg }}", &HashMap::new()).unwrap();
+	assert_eq!(std::fs::read_to_string(&path).unwrap(), "payload");
+	crate::cleanup_temp_artifacts();
+}
+
+#[test]
+fn temp_file_too_many_args_errors() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let err = args
+		.substitute("{{ temp_file('a', 'b', 'c') }}", &HashMap::new())
+		.unwrap_err();
+	assert!(matches!(err, SubstitutionError::FunctionArity { .. }));
+}
+
+#[test]
+fn temp_dir_creates_directory_and_cleanup_removes_recursively() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let path = args.substitute("{{ temp_dir() }}", &HashMap::new()).unwrap();
+	let p = std::path::Path::new(&path);
+	assert!(p.is_dir(), "temp_dir() should create a directory");
+	assert!(p.starts_with(std::env::temp_dir()));
+	// Drop a file inside to prove cleanup is recursive.
+	std::fs::write(p.join("inner.txt"), "data").unwrap();
+	crate::cleanup_temp_artifacts();
+	assert!(!p.exists(), "cleanup should remove the directory and its contents");
+}
+
+#[test]
+fn temp_dir_with_arg_errors() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let err = args.substitute("{{ temp_dir('x') }}", &HashMap::new()).unwrap_err();
+	assert!(matches!(err, SubstitutionError::FunctionArity { .. }));
+}
+
+#[test]
+fn temp_dir_dry_run_placeholder() {
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]).with_dry_run(true);
+	let result = args.substitute("ls {{ temp_dir() }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "ls <temp_dir>");
+}
+
 // ── json_get() / json_set() ──
 
 #[test]

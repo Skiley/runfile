@@ -17,6 +17,7 @@ pub use control_flow::*;
 pub use env::*;
 pub use executor::*;
 pub use extract::*;
+pub use functions::cleanup_temp_artifacts;
 pub use logging::*;
 pub use runner::*;
 

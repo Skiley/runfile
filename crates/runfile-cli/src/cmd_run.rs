@@ -280,6 +280,10 @@ pub fn cmd_run(
 			if timings {
 				log_total_timing(total_start.elapsed());
 			}
+			// Remove any `temp_file()` / `temp_dir()` artifacts before exiting.
+			// `process::exit` skips destructors, so this explicit call is the
+			// only cleanup hook on the normal exit path.
+			runfile_executor::cleanup_temp_artifacts();
 			// `final_status` already accounts for `ignoreErrors` (it's
 			// computed in the executor): if any step failed and the target
 			// wasn't `ignoreErrors`-ed, status is non-zero. Otherwise it's
@@ -295,6 +299,7 @@ pub fn cmd_run(
 			if timings {
 				log_total_timing(total_start.elapsed());
 			}
+			runfile_executor::cleanup_temp_artifacts();
 			eprintln!("Error: {e}");
 			process::exit(1);
 		}
@@ -516,6 +521,10 @@ pub fn cmd_watch(
 			yes,
 			pk_provider,
 		);
+
+		// Clean up `temp_file()` / `temp_dir()` artifacts from this iteration so
+		// a long-lived watch session doesn't accumulate them in the temp dir.
+		runfile_executor::cleanup_temp_artifacts();
 
 		eprintln!("{BOLD}{CYAN}[runfile]{RESET} {DIM}Watching for changes... (Ctrl+C to stop){RESET}");
 	}

@@ -756,6 +756,68 @@ pub(crate) fn evaluate_function(
 			}
 			Ok(generate_uuid())
 		}
+		// ── temp_file / temp_dir (create OS temp artifacts; auto-removed at CLI exit) ──
+		"temp_file" => {
+			// `temp_file([content], [extension])` — create a fresh file in the
+			// OS temp directory and return its absolute path. With one arg,
+			// `content` is written into the file; with a second arg, `extension`
+			// sets the file suffix (a leading dot is optional, so both `'json'`
+			// and `'.json'` yield `runfile-<uuid>.json`). Every created file is
+			// registered for deletion when the `runfile` CLI exits (see
+			// [`cleanup_temp_artifacts`]).
+			//
+			// Non-deterministic and side-effecting, so it mirrors `uuid` /
+			// `capture` / `write_file`: on `--dry-run` it returns the readable
+			// placeholder `<temp_file>` and creates nothing, and on the
+			// redacted-logging pass it ALSO skips creation (returning the
+			// placeholder) so the back-to-back log substitution never spawns a
+			// second, orphaned temp file. Because each real substitution pass
+			// runs once per leaf, a bare inline `temp_file()` creates exactly one
+			// file. The canonical pattern is to capture the path once and reuse
+			// it (the log then shows the real path via `VAR`):
+			//   "{{ define(cfg, temp_file()) }}"
+			//   "echo '...' > {{ VAR.cfg }}"
+			//   "tool --config {{ VAR.cfg }}"
+			if resolved.len() > 2 {
+				return Err(SubstitutionError::FunctionArity {
+					name: "temp_file".into(),
+					expected: "0, 1, or 2".into(),
+					got: resolved.len(),
+				});
+			}
+			if args.dry_run || redact_env {
+				return Ok("<temp_file>".to_string());
+			}
+			let content = resolved.first().map(String::as_str).unwrap_or("");
+			let ext = resolved
+				.get(1)
+				.map(|e| e.trim_start_matches('.'))
+				.filter(|e| !e.is_empty());
+			let mut name = format!("runfile-{}", generate_uuid());
+			if let Some(ext) = ext {
+				name.push('.');
+				name.push_str(ext);
+			}
+			let path = std::env::temp_dir().join(name);
+			std::fs::write(&path, content.as_bytes()).map_err(|e| SubstitutionError::TempFileError(e.to_string()))?;
+			register_temp_artifact(path.clone(), false);
+			Ok(path.to_string_lossy().into_owned())
+		}
+		"temp_dir" => {
+			// `temp_dir()` — create a fresh empty directory in the OS temp
+			// directory and return its absolute path. Registered for recursive
+			// deletion at CLI exit. Same dry-run / redacted-pass placeholder
+			// behavior as `temp_file` (returns `<temp_dir>` without creating
+			// anything).
+			expect_arity(&call.name, &resolved, 0)?;
+			if args.dry_run || redact_env {
+				return Ok("<temp_dir>".to_string());
+			}
+			let path = std::env::temp_dir().join(format!("runfile-{}", generate_uuid()));
+			std::fs::create_dir(&path).map_err(|e| SubstitutionError::TempDirError(e.to_string()))?;
+			register_temp_artifact(path.clone(), true);
+			Ok(path.to_string_lossy().into_owned())
+		}
 		// ── url percent-encoding (RFC 3986; space → %20, symmetric) ──
 		"url_encode" => {
 			expect_arity(&call.name, &resolved, 1)?;
@@ -1095,6 +1157,54 @@ fn run_capture(command: &str) -> Result<String, SubstitutionError> {
 		&stdout
 	};
 	Ok(trimmed.to_string())
+}
+
+/// One temp artifact created by `temp_file` / `temp_dir`, tracked for deletion
+/// at CLI exit.
+struct TempArtifact {
+	path: PathBuf,
+	is_dir: bool,
+}
+
+/// Process-global registry of temp files/dirs created via `temp_file` /
+/// `temp_dir`, drained and deleted by [`cleanup_temp_artifacts`].
+///
+/// A process-global static (rather than per-`RunArgs` state) for two reasons:
+/// (1) the CLI tears down via `std::process::exit`, which skips destructors, so
+/// cleanup is an explicit call the CLI makes before every exit — a global is the
+/// simplest thing it can reach without threading the registry back out of the
+/// executor; (2) `temp_file` runs deep inside substitution, far from any one
+/// `RunArgs` lifetime, and the same registry must cover artifacts created by
+/// `@target` children, parallel worker threads, and watch-mode re-runs alike.
+/// `Mutex::new` / `Vec::new` are both `const`, so the static needs no lazy init.
+static TEMP_ARTIFACTS: std::sync::Mutex<Vec<TempArtifact>> = std::sync::Mutex::new(Vec::new());
+
+/// Record a freshly-created temp artifact for deletion at CLI exit.
+fn register_temp_artifact(path: PathBuf, is_dir: bool) {
+	if let Ok(mut guard) = TEMP_ARTIFACTS.lock() {
+		guard.push(TempArtifact { path, is_dir });
+	}
+}
+
+/// Delete every temp file/dir created by `temp_file` / `temp_dir` so far and
+/// clear the registry. Best-effort: a missing/already-deleted path or a
+/// permission error is silently ignored. The CLI calls this before each
+/// `process::exit` and between watch-mode iterations.
+///
+/// Note: a hard kill (SIGKILL, power loss) skips this entirely — those leftover
+/// artifacts stay in the OS temp directory for the OS to reclaim. SIGINT
+/// (Ctrl+C) likewise terminates before cleanup unless the run completes
+/// normally, so long-running interrupted targets may leave artifacts behind.
+pub fn cleanup_temp_artifacts() {
+	if let Ok(mut guard) = TEMP_ARTIFACTS.lock() {
+		for artifact in guard.drain(..) {
+			if artifact.is_dir {
+				let _ = std::fs::remove_dir_all(&artifact.path);
+			} else {
+				let _ = std::fs::remove_file(&artifact.path);
+			}
+		}
+	}
 }
 
 /// Resolve a path argument passed to `read_file` / `file_exists`. Absolute
