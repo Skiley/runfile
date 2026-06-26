@@ -1,0 +1,18 @@
+{
+	"$schema": "https://raw.githubusercontent.com/Skiley/rust-binary-publish/v3.0.0/schema/publisher.schema.json",
+	"input": {
+		"type": "rust-binaries",
+		"binary-name": "run"
+	},
+	"outputs": [
+		{
+			"type": "github-release",
+			"extra-assets": "schemas/v0.schema.json"
+		},
+		{
+			"type": "npm-package",
+			"package-name": "@runfile/cli",
+			"package-description": "Runfile CLI — an easy-to-use, batteries-included task runner"
+		}
+	]
+}
