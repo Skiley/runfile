@@ -11,15 +11,28 @@ on:
 
 jobs:
   release:
-    uses: Skiley/rust-binary-publish/.github/workflows/release.yml@v1.0.0
+    uses: Skiley/rust-binary-publish/.github/workflows/release.yml@v2.0.0
     permissions:
       contents: write
       id-token: write
     with:
-      bin: run
-      extra-assets: schemas/v0.schema.json
-      npm-description: "Runfile CLI — an easy-to-use, batteries-included task runner"
-      npm-package: "@runfile/cli"
       tag: ${{ inputs.tag || github.ref_name }}
+      input: |
+        {
+          "type": "rust-binaries",
+          "binary-name": "run"
+        }
+      outputs: |
+        [
+          {
+            "type": "github-release",
+            "extra-assets": "schemas/v0.schema.json"
+          },
+          {
+            "type": "npm-package",
+            "package-name": "@runfile/cli",
+            "package-description": "Runfile CLI — an easy-to-use, batteries-included task runner"
+          }
+        ]
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
