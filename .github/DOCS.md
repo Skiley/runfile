@@ -2354,6 +2354,9 @@ run :completions output powershell | Invoke-Expression
 - **Sub-subcommands**: `:config shell set`, `:config path-alias add`, `:completions install`, `:generate zed-tasks`,
   `:env secret-keys add`, etc.
 - **Flags**: `-f`, `--file`, `--timings`, `-y`, `--yes`, `--dry-run`, `--stdin-args`, `--help`, `--version`
+- **File paths**: once you're past a subcommand into its positional arguments (e.g. `run :env decrypt <TAB>`,
+  `run :env inject <TAB>`, `run :config shell set bash <TAB>`), completion falls back to the shell's default
+  file/directory completion. The same fallback applies to a target's arguments (e.g. `run build <TAB>`).
 
 ---
 

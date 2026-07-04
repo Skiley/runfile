@@ -137,6 +137,15 @@ fn bash_completion_lists_targets_and_subcommands() {
 }
 
 #[test]
+fn bash_completion_falls_back_to_files_for_leaf_args() {
+	// A shared file-completion helper exists and is invoked when a subcommand
+	// path has no further children (leaf) or the first word is a target name.
+	assert!(BASH_COMPLETION.contains("_run_files"));
+	// The leaf branch (empty children) falls back to files.
+	assert!(BASH_COMPLETION.contains("_run_files\n    fi"));
+}
+
+#[test]
 fn zsh_completion_defines_compdef() {
 	// eval variant: initialises compinit and registers via compdef
 	assert!(ZSH_COMPLETION.contains("compdef _run run"));
@@ -149,6 +158,12 @@ fn zsh_completion_defines_compdef() {
 }
 
 #[test]
+fn zsh_completion_falls_back_to_files_for_leaf_args() {
+	// The `rest` state uses `_files` when a subcommand path has no children.
+	assert!(ZSH_COMPLETION.contains("_files"));
+}
+
+#[test]
 fn fish_completion_disables_default_file_completions() {
 	assert!(FISH_COMPLETION.contains("complete -c run -f"));
 	assert!(FISH_COMPLETION.contains("--list-targets"));
@@ -156,8 +171,21 @@ fn fish_completion_disables_default_file_completions() {
 }
 
 #[test]
+fn fish_completion_reenables_files_for_leaf_args() {
+	// A predicate function drives the force-files rule for positional args.
+	assert!(FISH_COMPLETION.contains("__run_needs_files"));
+	assert!(FISH_COMPLETION.contains("complete -c run -n '__run_needs_files' -F"));
+}
+
+#[test]
 fn powershell_completion_registers_completer() {
 	assert!(POWERSHELL_COMPLETION.contains("Register-ArgumentCompleter"));
 	assert!(POWERSHELL_COMPLETION.contains("--list-targets"));
 	assert!(POWERSHELL_COMPLETION.contains("--list-subcommands"));
+}
+
+#[test]
+fn powershell_completion_falls_back_to_files_for_leaf_args() {
+	// The leaf branch uses PowerShell's built-in filename completer.
+	assert!(POWERSHELL_COMPLETION.contains("CompletionCompleters]::CompleteFilename"));
 }

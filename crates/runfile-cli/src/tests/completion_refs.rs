@@ -4,8 +4,9 @@ use super::*;
 
 #[test]
 fn bash_completion_detects_colon_subcommands_generically() {
-	// The new bash script uses `:*) subcmd=...` to detect any colon-prefixed subcommand
-	assert!(BASH_COMPLETION.contains(":*)"));
+	// The bash script distinguishes ':'-prefixed subcommands from target names
+	// via a `:*` glob so any colon-prefixed subcommand is handled generically.
+	assert!(BASH_COMPLETION.contains("!= :*"));
 }
 
 #[test]
@@ -58,8 +59,9 @@ fn powershell_completion_does_not_reference_utilities() {
 
 #[test]
 fn powershell_completion_detects_colon_subcommands_generically() {
-	// The new powershell script uses regex '^:' to detect colon-prefixed subcommands
-	assert!(POWERSHELL_COMPLETION.contains("'^:'"));
+	// The powershell script distinguishes ':'-prefixed subcommands from target
+	// names via a `-notlike ':*'` check so any colon-prefixed subcommand works.
+	assert!(POWERSHELL_COMPLETION.contains("-notlike ':*'"));
 }
 
 #[test]

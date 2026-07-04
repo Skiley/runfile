@@ -342,36 +342,30 @@ _run_completions() {
         cword=$COMP_CWORD
     fi
 
-    # Determine context: which subcommand are we in?
-    local subcmd=""
-    local subcmd2=""
-    for ((i=1; i < cword; i++)); do
-        case "${words[i]}" in
-            -f|--file) ((i++)); continue ;;
-            -*) continue ;;
-            :*) subcmd="${words[i]}"; break ;;
-            *) break ;;  # first positional = target name, stop
-        esac
-    done
-
-    # If in a subcommand, find sub-subcommand
-    if [[ -n "$subcmd" ]]; then
-        for ((i=i+1; i < cword; i++)); do
-            case "${words[i]}" in
-                -*) continue ;;
-                *) subcmd2="${words[i]}"; break ;;
-            esac
-        done
-    fi
+    # Helper: get subcommand names from --list-subcommands (strips descriptions)
+    _run_subcmds() {
+        run --list-subcommands "$1" 2>/dev/null | cut -f1
+    }
+    # Helper: fall back to the shell's default file/directory completion.
+    # Prefer bash-completion's _filedir when present, but some versions return
+    # nothing for an empty current word — fall back to compgen in that case so
+    # `run :env decrypt <TAB>` still lists files.
+    _run_files() {
+        COMPREPLY=()
+        if declare -F _filedir >/dev/null 2>&1; then
+            _filedir
+        fi
+        if [[ ${#COMPREPLY[@]} -eq 0 ]]; then
+            local IFS=$'\n'
+            COMPREPLY=($(compgen -f -- "$cur"))
+            compopt -o filenames 2>/dev/null
+        fi
+    }
 
     # Complete flag values
     case "$prev" in
         -f|--file)
-            if declare -F _filedir >/dev/null 2>&1; then
-                _filedir
-            else
-                COMPREPLY=($(compgen -f -- "$cur"))
-            fi
+            _run_files
             return ;;
     esac
 
@@ -381,26 +375,48 @@ _run_completions() {
         return
     fi
 
-    # Helper: get subcommand names from --list-subcommands (strips descriptions)
-    _run_subcmds() {
-        run --list-subcommands "$1" 2>/dev/null | cut -f1
-    }
+    # Collect the non-flag words already typed (the subcommand path so far),
+    # skipping flags and the value of -f/--file.
+    local -a consumed=()
+    local i
+    for ((i=1; i < cword; i++)); do
+        case "${words[i]}" in
+            -f|--file) ((i++)); continue ;;
+            -*) continue ;;
+            *) consumed+=("${words[i]}") ;;
+        esac
+    done
 
-    # If in a subcommand, complete its children
-    if [[ -n "$subcmd" ]]; then
-        if [[ -n "$subcmd2" ]]; then
-            COMPREPLY=($(compgen -W "$(_run_subcmds "$subcmd.$subcmd2")" -- "$cur"))
-        else
-            COMPREPLY=($(compgen -W "$(_run_subcmds "$subcmd")" -- "$cur"))
-        fi
+    # Top level (nothing consumed yet): subcommands + dynamic targets
+    if [[ ${#consumed[@]} -eq 0 ]]; then
+        local targets subcmds
+        targets=$(run --list-targets 2>/dev/null)
+        subcmds=$(_run_subcmds "")
+        COMPREPLY=($(compgen -W "$subcmds $targets" -- "$cur"))
         return
     fi
 
-    # Top level: subcommands + dynamic targets
-    local targets subcmds
-    targets=$(run --list-targets 2>/dev/null)
-    subcmds=$(_run_subcmds)
-    COMPREPLY=($(compgen -W "$subcmds $targets" -- "$cur"))
+    # A target name (not a ':' subcommand): its arguments are positional →
+    # fall back to file completion.
+    if [[ "${consumed[0]}" != :* ]]; then
+        _run_files
+        return
+    fi
+
+    # Build the dotted subcommand path (e.g. ":env decrypt" → ":env.decrypt")
+    # and ask for its children. An empty result means we've reached a leaf
+    # subcommand (or moved past it into positional args) — complete files.
+    local path
+    printf -v path '%s.' "${consumed[@]}"
+    path="${path%.}"
+
+    local kids
+    kids=$(_run_subcmds "$path")
+    if [[ -n "$kids" ]]; then
+        COMPREPLY=($(compgen -W "$kids" -- "$cur"))
+    else
+        _run_files
+    fi
 }
 complete -F _run_completions run
 "#;
@@ -445,17 +461,32 @@ _run() {
             _describe 'subcommand' subcommands -- dyn_targets && return
             ;;
         rest)
-            local subcmd="$words[1]"
-            if [[ "$subcmd" == :* ]]; then
-                if (( CURRENT > 2 )) && [[ -n "$words[2]" ]] && [[ "$words[2]" != -* ]]; then
-                    local -a sub_cmds
-                    sub_cmds=(${(f)"$(_run_subcmds "$subcmd.$words[2]")"})
-                    _describe "$subcmd $words[2] command" sub_cmds
-                else
-                    local -a cmds
-                    cmds=(${(f)"$(_run_subcmds "$subcmd")"})
-                    _describe "$subcmd command" cmds
-                fi
+            local first="$words[1]"
+            # A target name (not a ':' subcommand): its args are positional →
+            # complete files.
+            if [[ "$first" != :* ]]; then
+                _files
+                return
+            fi
+            # Build the dotted subcommand path from every non-flag word typed
+            # before the cursor (e.g. ":env decrypt" → ":env.decrypt").
+            local -a parts
+            local idx
+            for (( idx=1; idx < CURRENT; idx++ )); do
+                [[ "$words[idx]" == -* ]] && continue
+                parts+=("$words[idx]")
+            done
+            local path="${(j:.:)parts}"
+            # Ask for the children of that path. Empty output means we've hit a
+            # leaf subcommand (or moved past it into positional args) → files.
+            local out
+            out="$(_run_subcmds "$path")"
+            if [[ -n "$out" ]]; then
+                local -a cmds
+                cmds=(${(f)out})
+                _describe "$path command" cmds
+            else
+                _files
             fi
             ;;
     esac
@@ -468,6 +499,39 @@ compdef _run run
 
 pub const FISH_COMPLETION: &str = r#"# Disable file completions by default
 complete -c run -f
+
+# Returns success (→ re-enable file completion) when the cursor is at a
+# positional-argument position: either a leaf subcommand that takes no further
+# sub-subcommands (e.g. `:env decrypt <file>`) or a target's arguments.
+function __run_needs_files
+    set -l tokens (commandline -opc)
+    set -l parts
+    set -l skip 0
+    for t in $tokens[2..-1]
+        if test $skip -eq 1
+            set skip 0
+            continue
+        end
+        switch $t
+            case '-f' '--file'
+                set skip 1
+            case '-*'
+                # ignore other flags
+            case '*'
+                set -a parts $t
+        end
+    end
+    # Nothing consumed yet → top level (subcommands + targets), no files
+    test (count $parts) -gt 0; or return 1
+    # A target name (not a ':' subcommand) → positional args → files
+    string match -q -- ':*' $parts[1]; or return 0
+    # Leaf subcommand (no children) → files; nodes with children → no files
+    set -l kids (run --list-subcommands (string join '.' $parts) 2>/dev/null)
+    test -z "$kids"
+end
+
+# Re-enable file completion for positional arguments
+complete -c run -n '__run_needs_files' -F
 
 # Subcommands (only when no subcommand is given yet)
 complete -c run -n '__fish_use_subcommand' -a '(run --list-subcommands 2>/dev/null)'
@@ -511,58 +575,57 @@ complete -c run -n '__fish_seen_subcommand_from secret-keys' -a '(run --list-sub
 pub const POWERSHELL_COMPLETION: &str = r#"Register-ArgumentCompleter -CommandName run -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $words = $commandAst.ToString().Substring(0, $cursorPosition) -split '\s+'
-    $wordCount = $words.Count
-
     # Helper: get subcommand names from --list-subcommands (strips descriptions)
     function Get-RunSubcmds($path) {
         $output = if ($path) { run --list-subcommands $path 2>$null } else { run --list-subcommands 2>$null }
         if ($output) { $output -split "`n" | ForEach-Object { ($_ -split "`t")[0] } | Where-Object { $_ } }
     }
 
-    # Find context
-    $subcmd = $null
-    for ($i = 1; $i -lt $wordCount - 1; $i++) {
-        switch ($words[$i]) {
-            { $_ -in '-f', '--file' } { $i++; continue }
-            { $_ -match '^-' } { continue }
-            { $_ -match '^:' } { $subcmd = $words[$i]; break }
-            default { break }
-        }
+    # Tokens typed before the cursor, excluding the command name ('run') and the
+    # word currently being completed.
+    $line = $commandAst.ToString()
+    if ($cursorPosition -lt $line.Length) { $line = $line.Substring(0, $cursorPosition) }
+    $tokens = @($line -split '\s+' | Where-Object { $_ -ne '' })
+    # Drop the command name ('run').
+    if ($tokens.Count -gt 0) { $tokens = @($tokens | Select-Object -Skip 1) }
+    # If the cursor sits mid-word, drop that partial word from the consumed set.
+    if (-not $line.EndsWith(' ') -and $tokens.Count -gt 0) {
+        $tokens = @($tokens | Select-Object -SkipLast 1)
     }
 
-    # Find sub-subcommand
-    $subcmd2 = $null
-    if ($subcmd -and $i -lt $wordCount - 1) {
-        for ($j = $i + 1; $j -lt $wordCount - 1; $j++) {
-            switch ($words[$j]) {
-                { $_ -match '^-' } { continue }
-                default { $subcmd2 = $words[$j]; break }
-            }
-        }
-    }
-
-    # If in a subcommand, complete its children
-    if ($subcmd) {
-        if ($subcmd2) {
-            Get-RunSubcmds "$subcmd.$subcmd2" |
-                Where-Object { $_ -like "$wordToComplete*" } |
-                ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
-        } else {
-            Get-RunSubcmds $subcmd |
-                Where-Object { $_ -like "$wordToComplete*" } |
-                ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
-        }
-        return
+    # Keep only non-flag words (the subcommand path so far), skipping -f/--file's value.
+    $consumed = @()
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $t = $tokens[$i]
+        if ($t -in '-f', '--file') { $i++; continue }
+        if ($t -match '^-') { continue }
+        $consumed += $t
     }
 
     # Top level: subcommands + dynamic targets
-    $completions = @(Get-RunSubcmds)
-    $targets = run --list-targets 2>$null
-    if ($targets) { $completions += $targets -split "`n" }
+    if ($consumed.Count -eq 0) {
+        $completions = @(Get-RunSubcmds)
+        $targets = run --list-targets 2>$null
+        if ($targets) { $completions += $targets -split "`n" }
+        return $completions |
+            Where-Object { $_ -like "$wordToComplete*" } |
+            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+    }
 
-    $completions |
-        Where-Object { $_ -like "$wordToComplete*" } |
-        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+    # A target name (not a ':' subcommand): its arguments are positional → files
+    if ($consumed[0] -notlike ':*') {
+        return [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)
+    }
+
+    # Build the dotted subcommand path and complete its children. No children
+    # means a leaf subcommand (or past it into positional args) → files.
+    $kids = @(Get-RunSubcmds ($consumed -join '.'))
+    if ($kids.Count -gt 0) {
+        return $kids |
+            Where-Object { $_ -like "$wordToComplete*" } |
+            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+    }
+
+    return [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)
 }
 "#;

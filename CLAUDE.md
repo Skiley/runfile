@@ -938,6 +938,19 @@ crates/
   canonical name starting with `_`.
 - Uses `run_target()` from the runner module, not `execute_command()` directly — this ensures the `when:`-aware
   walker and `@target` resolver are always engaged.
+- Shell completion scripts (`completions.rs`, one hand-written script per shell: bash/zsh/fish/powershell) fall back
+  to the shell's native **file completion** once the cursor is past a subcommand into positional-argument territory
+  (e.g. `run :env decrypt <TAB>`, `run :config shell set bash <TAB>`, or any target's args like `run build <TAB>`).
+  The detection is a single `run --list-subcommands <dotted.path>` query built from the already-typed non-flag words:
+  `cmd_list_subcommands` prints nothing both for a leaf subcommand *and* for a path that runs past the leaf into args
+  (its `find_subcommand` walk early-returns) — exactly the two cases where files should be offered — so one query
+  distinguishes "still choosing a subcommand" (non-empty children → complete names) from "typing an argument"
+  (empty → complete files) at arbitrary depth. A first word that isn't `:`-prefixed is a target name, so its args go
+  straight to file completion. Bash needs a `compgen -f` fallback inside its `_run_files` helper because
+  bash-completion's `_filedir` returns nothing for an *empty* current word (it quotes `""` into a literal `''`);
+  zsh uses `_files`, fish re-enables files via a `__run_needs_files` predicate paired with a `-F` rule (the global
+  `complete -c run -f` still disables files everywhere else), and powershell uses
+  `[CompletionCompleters]::CompleteFilename`.
 - CI detection lives in `ci_detect.rs` (used by `:env secret-keys add --key` to gate non-interactive key
   entry; `is_ci_with(env_lookup)` is the testable pure form, `is_ci()` reads `std::env`). The list of CI vars:
   any non-empty value in `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `BUILDKITE`, `JENKINS_URL`,
