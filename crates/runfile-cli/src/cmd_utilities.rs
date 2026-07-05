@@ -443,7 +443,10 @@ pub fn cmd_generate_jetbrains_run_configs(
 				if i > 0 {
 					write_generated_to_stdout(b"\n");
 				}
-				write_generated_to_stdout(format!("<!-- {} -->\n", file_path.display()).as_bytes());
+				// Normalize to forward slashes so the delimiter comment is identical on every
+				// platform (on Windows `Path::display` would render `.run\Runfile_*.run.xml`).
+				let display_path = file_path.display().to_string().replace('\\', "/");
+				write_generated_to_stdout(format!("<!-- {display_path} -->\n").as_bytes());
 			}
 			write_generated_to_stdout(&bytes);
 		}
