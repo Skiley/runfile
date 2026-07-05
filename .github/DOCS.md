@@ -160,9 +160,9 @@ $ run dev --port=4000           # Named arguments
 | `run :config reset`                                   | Delete the settings file, resetting all configuration to defaults                                  |
 | `run :convert package-json`                           | Convert `package.json` scripts into Runfile targets                                                |
 | `run :convert makefile`                               | Convert Makefile targets into Runfile targets                                                      |
-| `run :generate zed-tasks`                             | Generate Zed editor tasks from Runfile targets                                                     |
-| `run :generate vscode-tasks`                          | Generate VS Code tasks from Runfile targets                                                        |
-| `run :generate jetbrains-run-configurations`          | Generate JetBrains IDE run configurations from Runfile targets                                     |
+| `run :generate zed-tasks [--stdout]`                  | Generate Zed editor tasks from Runfile targets (`--stdout` prints instead of writing to disk)      |
+| `run :generate vscode-tasks [--stdout]`               | Generate VS Code tasks from Runfile targets (`--stdout` prints instead of writing to disk)         |
+| `run :generate jetbrains-run-configurations [--stdout]`| Generate JetBrains IDE run configurations from Runfile targets (`--stdout` prints instead of writing)|
 | `run :mcp inspect`                                    | Print the MCP tool definitions as JSON and exit                                                    |
 | `run :mcp install [<agent>]`                          | Install the MCP server config for an agent (claude-code, cursor, claude-desktop, codex, junie)     |
 | `run :mcp server`                                     | Start the MCP server on stdio                                                                      |
@@ -687,6 +687,8 @@ one space — strict whitespace).
   //   encoding  : base64_encode, base64_decode
   //   hashing   : sha256, md5
   //   files     : read_file, write_file, file_exists
+  //   temp      : temp_file, temp_dir
+  //   ids/time  : uuid, now
   //   json      : json_get, json_set
   //   error     : try
   //   shell     : shell_quote, capture
@@ -732,6 +734,7 @@ one space — strict whitespace).
 | **hashing**   | `sha256(s)`, `md5(s)` — hex digest of UTF-8 bytes. **`md5` is non-cryptographic** — use `sha256` for security-sensitive contexts.                                                                                          |
 | **ids/time**  | `uuid()` — v4-shaped UUID for unique temp / cache names (not cryptographically strong; `--dry-run` → `<uuid>`). `now(format)` — current UTC time; formats: `unix-timestamp`, `unix-millis`, `iso` / `iso-8601` / `rfc3339`, `iso-date` / `date`, `iso-time` / `time`, and `year` / `month` / `day` / `hour` / `minute` / `second`. Unknown format errors. |
 | **files**     | `read_file(path)`, `write_file(path, content)`, `file_exists(path)` (`"true"`/`"false"`). Relative paths anchor to `{{ RUN.parent }}`. Permission errors fold to `"false"` for `file_exists`; pair with `try(read_file(p))` to distinguish unreadable. `write_file` returns `""` (so a line containing only the call is empty-command-skipped), goes through `std::fs::write` to bypass the shell entirely, and skips on `--dry-run` and the redacted-logging pass. IO failure surfaces as `WriteFileError`. |
+| **temp**      | `temp_file([content], [extension])` — create a fresh file `runfile-<uuid>` in the OS temp dir, optionally writing `content` and appending `.<extension>` (a leading dot is stripped, so `'json'` and `'.json'` both yield `…​.json`); returns the absolute path (arity 0/1/2). `temp_dir()` — create a fresh empty directory `runfile-<uuid>` in the OS temp dir; returns its path. Both are **auto-deleted when the CLI exits** (files removed, dirs removed recursively — best effort; a hard kill / Ctrl+C before completion may leave artifacts for the OS to reclaim). Both are non-deterministic + side-effecting, so `--dry-run` and the redacted-logging pass return the placeholders `<temp_file>` / `<temp_dir>` and create nothing. Each real substitution creates a **new** artifact (no per-callsite memoization) — capture the path once with `define(...)` to reuse it. Creation failure surfaces as `TempFileError` / `TempDirError`. |
 | **json**      | `json_get(json, path)` (dotted path; numeric segments are array indices; missing → `""`), `json_set(json, path, value)` — returns the modified JSON as compact text. Intermediate containers are created on demand.       |
 | **error**     | `try(expr)` — swallow errors from inner expressions. Standalone returns `""` on failure; chained, the next segment runs as a fallback. See below. `error('message')` — fail the current command on purpose: prints `message` to stderr and marks the step failed, but the failure flows through the normal walker (so `when: failure` / `when: always` steps still run and `ignoreErrors` still suppresses it) rather than aborting as a hard substitution error. `--dry-run` → `<error: '…'>` placeholder (no print, no fail). |
 | **shell**     | `shell_quote(s)` — quote `s` correctly for the active `RUN.shell`. Lets you safely inline arbitrary bytes (newlines, `$`, quotes, JSON) as a single argv slot without env-var indirection. `capture(cmd)` runs `cmd` through the platform's default shell (sh / cmd) at substitution time and returns stdout with the trailing newline stripped; non-zero exit errors as `CaptureFailed`. Results are memoized per resolved command string within a run (shared across `@target` boundaries) so repeats don't re-spawn and the real/redacted log passes don't double-execute. `--dry-run` substitutes `<capture: '<cmd>'>` instead of spawning. |
@@ -767,6 +770,32 @@ don't race.
   "npm run build"
 ]
 ```
+
+#### `temp_file` / `temp_dir` create auto-cleaned artifacts
+
+`temp_file(...)` and `temp_dir()` create scratch files/directories in the OS temp dir and register them for
+deletion when the `run` process exits — no manual cleanup needed. Because each substitution creates a **new**
+artifact, capture the path once with `define(...)` and reference it via `{{ VAR.* }}` everywhere you need the
+same file:
+
+```jsonc
+"commands": [
+  // WRONG — each {{ temp_file() }} makes a different file:
+  //   "echo hi > {{ temp_file() }}", "cat {{ temp_file() }}"
+
+  // RIGHT — create once, reuse via VAR:
+  "{{ define(payload, temp_file('{\"ok\":true}', 'json')) }}",
+  "cat {{ VAR.payload }}",
+  "jq .ok {{ VAR.payload }}",
+
+  // A scratch working dir that's gone when the run ends:
+  "{{ define(work, temp_dir()) }}",
+  "git clone --depth 1 https://example.com/repo {{ VAR.work }}/repo"
+]
+```
+
+Under `--dry-run` (and in redacted `--logging` output) the calls resolve to the placeholders `<temp_file>` /
+`<temp_dir>` and create nothing.
 
 #### Quote semantics inside `{{ ... }}`
 
@@ -2013,7 +2042,8 @@ gets one of six cycling colours so adjacent branches stay distinct. SGR colours 
 every nested shell with its branch identity.
 
 Set `RUNFILE_NO_LINE_PREFIX=1` (or `true`) to opt out and inherit raw stdio instead. Useful when you need exact byte-level
-output preservation, or when piping through another tool that already prefixes lines.
+output preservation, or when piping through another tool that already prefixes lines. Set `NO_COLOR` (any non-empty
+value, per the [`NO_COLOR`](https://no-color.org) convention) to keep the bracketed labels but drop the ANSI colours.
 
 `parallel` is a **target-only** property (not available in `globals`). To make it conditional per-platform, dispatch
 into specialized targets via `if "{{ RUN.os == '...' }}"` + `@target`.
@@ -2601,6 +2631,27 @@ Options:
 
 Re-running the command updates existing configurations that were generated by Runfile. If a file already exists but has
 a different configuration name or runs a different command, it is skipped with a warning.
+
+### Common generator behaviour
+
+These apply to all three `:generate` subcommands:
+
+- **`--stdout`** — print the freshly generated config to stdout instead of writing to disk. In this mode nothing is
+  read or written on disk (no merge with an existing file, no directory creation, no stale-entry pruning) — the exact
+  bytes that would be written are emitted, so `run :generate vscode-tasks --stdout > .vscode/tasks.json` matches the
+  on-disk output. JetBrains produces one config per target, so with more than one target each is emitted prefixed by a
+  `<!-- <dir>/<file> -->` delimiter comment (a single target is emitted verbatim for a clean redirect into a
+  `.run.xml`).
+- **Stale-entry pruning** — re-running a generator after a target is renamed or removed deletes the now-orphan
+  task/config it previously generated. The ownership check is structural (it matches the shape of entries Runfile
+  itself emits), so hand-authored tasks/configs are never touched.
+- **Internal (`_`-prefixed) and `metadata.excludeFromGenerateCommand: true` targets are skipped** — they produce no
+  task/config, and existing generated entries for them are pruned.
+- **`.editorconfig`-aware output** — the written files (`.vscode/tasks.json`, `.zed/tasks.json`, `.run/*.run.xml`)
+  respect your project's [`.editorconfig`](https://editorconfig.org) for indentation, line endings, trailing
+  whitespace, final newline, and `utf-8-bom`. The same applies to the `Runfile.json` written by
+  [`run :init`](#bootstrapping-a-new-project) and `run :convert`. With no applicable `.editorconfig`, output is
+  byte-for-byte identical to previous versions (2-space indent, LF).
 
 ---
 
