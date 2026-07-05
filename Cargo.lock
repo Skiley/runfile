@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-cli"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "clap",
  "dirs",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-converters"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "runfile-parser",
  "serde_json",
@@ -1559,7 +1559,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-crypto"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-env"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "runfile-crypto",
  "tempfile",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-executor"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "base64",
  "dirs",
@@ -1604,7 +1604,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-generators"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "runfile-parser",
  "serde",
@@ -1614,7 +1614,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-mcp"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "rmcp",
  "runfile-parser",
@@ -1626,7 +1626,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-parser"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "json5",
  "serde",
@@ -1637,7 +1637,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-settings"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "apple-native-keyring-store",
  "dirs",
@@ -1656,7 +1656,7 @@ dependencies = [
 
 [[package]]
 name = "runfile-shell"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "serde",
  "thiserror",
