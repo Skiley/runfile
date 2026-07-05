@@ -1232,6 +1232,16 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   on Windows require function pointers, not closures.
 - VS Code tasks generator (`run :generate vscode-tasks`) follows the same pattern as the Zed generator: generates
   `.vscode/tasks.json`, merges with existing files preserving user-added fields via `#[serde(flatten)]`.
+- **`--stdout` on all three `:generate` subcommands** (a per-subcommand `bool` flag, default off; in `main.rs`'s
+  `GenerateAction` variants) prints the generated config to stdout instead of writing to disk. In this mode the
+  handlers (`cmd_generate_*` in `cmd_utilities.rs`) emit the **freshly generated** config — NOT merged with any
+  existing on-disk file — formatted per `.editorconfig` for the path it would occupy, and perform **no** disk
+  reads/writes (no existing-file read, no `.vscode`/`.zed`/`.run` dir creation, no stale sweep, no summary
+  messages). Bytes are written verbatim via the shared `write_generated_to_stdout` helper (exact bytes, no added
+  trailing newline, so redirects/pipes match on-disk output; a broken pipe exits 0 quietly). JetBrains produces one
+  file per target, so `--stdout` emits each config's XML and — only when there's more than one — prefixes each with
+  a `<!-- <run_dir>/<file> -->` comment delimiter (a single config is emitted verbatim for a clean redirect into a
+  `.run.xml`). The non-`--stdout` path is unchanged.
 - All three editor generators (`vscode`, `zed`, `jetbrains-run-configurations`) inject `--stdin-args` into the
   generated invocation. Editor run configs are static (no per-invocation arg prompt UI built into the IDE), so
   `--stdin-args` is what lets a static config still cover targets that need user input — missing `{{ ARG.x }}` /
@@ -1258,6 +1268,45 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
     matching the filename pattern) is left alone unless all three markers are present. The "Removed:"
     section prints alongside "Added" / "Updated" / "Skipped"; the no-op early-return also gates on
     `removed.is_empty()`.
+- **EditorConfig-conformant output for every file Runfile writes.** The files `:generate` writes
+  (`.vscode/tasks.json`, `.zed/tasks.json`, `.run/*.run.xml`) **and** the `Runfile.json` written by `:init`
+  and `:convert` are formatted to match the project's [`.editorconfig`](https://editorconfig.org) settings for
+  that path. The support lives in `runfile-generators/src/editorconfig.rs` — a dependency-free, self-contained
+  module (mirrors the crate's hand-rolled-parser style; adds only a `tempfile` **dev**-dependency for the
+  filesystem resolution tests). It:
+  - Parses `.editorconfig` (INI-ish: `[section]` glob headers + `key = value`, `#`/`;` comments, preamble
+    `root = true`), walking up from the target file's directory and stopping at the first `root = true`.
+  - Matches section globs against the file path with `section_matches` (a hand-rolled EditorConfig glob matcher:
+    brace expansion `{a,b}` / `{n..m}` first via `expand_braces`, then a recursive `*` (non-`/`) / `**` (any) /
+    `?` / `[...]`/`[!...]` matcher). No-separator patterns match the basename at any depth; patterns with a `/`
+    are anchored to the config dir. Known limitation: an explicit `**/foo` doesn't match a top-level `foo` (the
+    zero-directory case) — no realistic section for these files needs it.
+  - Merges matched sections into `EditorConfigProps` (farthest file first, later sections win; a value of
+    `unset` clears the property). Raw values are merged as strings, then interpreted once, so `unset` and
+    last-wins compose correctly.
+  - `EditorConfigProps::indent_unit()` yields the one-level indent string (`"\t"` or N spaces from
+    `indent_size` / `tab_width`, `None` → keep the renderer default). `EditorConfigProps::apply(text)` produces
+    the final bytes: normalizes line endings (`end_of_line`), optionally `trim_trailing_whitespace`, applies the
+    `insert_final_newline` policy (`None` = preserve whatever the renderer emitted), and prepends a UTF-8 BOM for
+    `charset = utf-8-bom` (other charsets are not re-encoded — text is always written UTF-8).
+  - Rendering: `render_vscode_tasks` / `render_zed_tasks` serialize JSON via `serialize_json_with_indent`
+    (a `serde_json` `PrettyFormatter::with_indent` wrapper) then `apply`; `render_jetbrains_config` rebuilds the
+    XML with the resolved indent unit (`build_jetbrains_run_config` takes `indent: Option<&str>`; `i1` = one
+    level, `i2` = two) then `apply`. The CLI (`cmd_utilities.rs`) resolves `EditorConfigProps::resolve_for_path`
+    per output file and calls these instead of the old `to_string_pretty` / `config.xml` write paths.
+  - `:init` / `:convert` (writing `Runfile.json`): `write_runfile_to_path` (in `runfile_helpers.rs`, used by
+    both `:convert package-json` and `:convert makefile`) resolves props for the target path and serializes via
+    `serialize_json_with_indent` + `apply`. `cmd_init` writes the fixed tab-indented `INIT_TEMPLATE` through
+    `EditorConfigProps::apply_to_tab_indented`, which retargets the template's one-tab-per-level indentation to
+    the resolved indent unit (keeping tabs when the resolved style is tab or unset, via the private
+    `retab_leading`) and then runs `apply`. Using the template + retab (rather than reparsing/reserializing the
+    JSON) preserves the template's exact key order (`description` before `commands`), which a `serde_json::Value`
+    round-trip would alphabetize.
+  - **Backward compatible:** with no applicable `.editorconfig`, `EditorConfigProps::default()` reproduces the
+    historical output byte-for-byte (2-space indent, LF, no trailing newline for JSON; the XML keeps its trailing
+    newline). `generate_jetbrains_configs` still populates each config's `xml` with the default-indent form (used
+    by the ownership-check tests); the CLI just re-renders with resolved props before writing. Resolution errors
+    (unreadable `.editorconfig`) degrade to "no settings" rather than failing generation.
 
 ## Testing Requirements
 
@@ -1272,6 +1321,14 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
 4. Integration tests (in `runfile-executor`) spawn real shells, so they depend on having at least one shell available on
    the test machine.
 5. Cross-platform: test assertions about PATH must normalize backslashes (`path.replace('\\', "/")`).
+6. CLI command *behavior* (as opposed to arg parsing) is tested by driving the compiled binary as a subprocess:
+   `runfile-cli/tests/generate_and_write_cli.rs` runs `env!("CARGO_BIN_EXE_run")` in an isolated temp dir (with
+   `HOME` / `XDG_CONFIG_HOME` / `APPDATA` pointed at an empty dir so user settings and global Runfiles can't leak
+   targets in) and asserts on stdout and written files. This is where `:generate --stdout` (prints, touches no
+   disk), the `.editorconfig`-aware file output, and `:init` / `:convert` formatting are covered end-to-end —
+   the `cmd_*` handlers themselves aren't unit-testable inline (they `process::exit` and use CWD-relative paths).
+   Pure formatting logic stays unit-tested in `runfile-generators` (`src/tests/editorconfig.rs`); the subprocess
+   tests only assert the wiring.
 
 ## README
 

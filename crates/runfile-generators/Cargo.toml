@@ -9,3 +9,6 @@ description = "Editor integration generators (Zed tasks, JetBrains run configura
 serde = { workspace = true }
 serde_json = { workspace = true }
 runfile-parser = { path = "../runfile-parser" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,3 +1,4 @@
+use crate::editorconfig::{serialize_json_with_indent, EditorConfigProps};
 use runfile_parser::{is_internal_target_name, CommandSpec, Runfile};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -115,6 +116,17 @@ pub fn merge_vscode_tasks(existing: &mut VsCodeTasksFile, generated: Vec<VsCodeT
 		updated,
 		removed,
 	}
+}
+
+/// Render a VS Code tasks file to the exact bytes to write to `.vscode/tasks.json`, formatted
+/// per the resolved EditorConfig properties: indentation drives the JSON pretty-printer, and the
+/// remaining settings (line endings, trailing whitespace, final newline, BOM) are applied to the
+/// serialized text. With an empty [`EditorConfigProps`] this reproduces the previous output
+/// (2-space indent, LF, no trailing newline).
+pub fn render_vscode_tasks(file: &VsCodeTasksFile, props: &EditorConfigProps) -> Result<Vec<u8>, serde_json::Error> {
+	let indent = props.indent_unit();
+	let json = serialize_json_with_indent(file, indent.as_deref())?;
+	Ok(props.apply(&json))
 }
 
 /// Decide whether an existing task is one we'd have generated for the same target.

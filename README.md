@@ -629,10 +629,23 @@ $ run :generate zed-tasks
 $ run :generate jetbrains-run-configurations
 ```
 
+Pass `--stdout` to any of these to print the generated configuration to standard output instead of
+writing it to disk — handy for previewing, piping, or diffing in CI. The output is the freshly
+generated config (not merged with any existing file on disk) and nothing is created or modified.
+For `jetbrains-run-configurations`, which produces one file per target, each block is delimited by a
+`<!-- .run/<file> -->` comment when more than one is emitted.
+
 Skip a target from the generated configs by setting `metadata.excludeFromGenerateCommand: true`. The
 `metadata` block on `globals` and on each target is **fully open** — any property of any JSON type
 (strings, numbers, booleans, arrays, deeply-nested objects) is accepted and round-trips untouched, so
 editor extensions and CI scripts can stash arbitrary tooling-specific fields here.
+
+Every file Runfile writes honors your project's [**`.editorconfig`**](https://editorconfig.org): the
+output is formatted to match the settings that apply to each written path — the editor files above
+(`.vscode/tasks.json`, `.zed/tasks.json`, `.run/*.run.xml`) as well as the `Runfile.json` produced by
+`:init` and `:convert`. `indent_style` / `indent_size` / `tab_width` drive indentation, `end_of_line`
+sets the newline sequence, `insert_final_newline` and `trim_trailing_whitespace` are applied, and
+`charset = utf-8-bom` prepends a BOM. When no `.editorconfig` applies, the previous defaults are kept.
 
 #### Migrate in seconds
 

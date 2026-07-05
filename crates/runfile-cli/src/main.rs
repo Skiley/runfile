@@ -176,18 +176,27 @@ enum GenerateAction {
 		/// Directory to write .xml run configurations to (defaults to .run)
 		#[arg(short = 'o', long = "output-dir")]
 		output_dir: Option<PathBuf>,
+		/// Print the generated run configurations to stdout instead of writing them to disk
+		#[arg(long = "stdout")]
+		stdout: bool,
 	},
 	/// Generate VS Code tasks from Runfile targets
 	VscodeTasks {
 		/// Path to the Runfile.json (defaults to auto-discovery)
 		#[arg(short = 'f', long = "file")]
 		file: Option<PathBuf>,
+		/// Print the generated tasks to stdout instead of writing them to disk
+		#[arg(long = "stdout")]
+		stdout: bool,
 	},
 	/// Generate Zed editor tasks from Runfile targets
 	ZedTasks {
 		/// Path to the Runfile.json (defaults to auto-discovery)
 		#[arg(short = 'f', long = "file")]
 		file: Option<PathBuf>,
+		/// Print the generated tasks to stdout instead of writing them to disk
+		#[arg(long = "stdout")]
+		stdout: bool,
 	},
 }
 
@@ -466,11 +475,15 @@ fn main() {
 			CompletionsAction::Output { shell } => completions::cmd_completions_output(&shell),
 		},
 		Some(Commands::Generate { action }) => match action {
-			GenerateAction::ZedTasks { file } => cmd_utilities::cmd_generate_zed_tasks(file.as_deref()),
-			GenerateAction::JetbrainsRunConfigurations { file, output_dir } => {
-				cmd_utilities::cmd_generate_jetbrains_run_configs(file.as_deref(), output_dir.as_deref())
+			GenerateAction::ZedTasks { file, stdout } => cmd_utilities::cmd_generate_zed_tasks(file.as_deref(), stdout),
+			GenerateAction::JetbrainsRunConfigurations {
+				file,
+				output_dir,
+				stdout,
+			} => cmd_utilities::cmd_generate_jetbrains_run_configs(file.as_deref(), output_dir.as_deref(), stdout),
+			GenerateAction::VscodeTasks { file, stdout } => {
+				cmd_utilities::cmd_generate_vscode_tasks(file.as_deref(), stdout)
 			}
-			GenerateAction::VscodeTasks { file } => cmd_utilities::cmd_generate_vscode_tasks(file.as_deref()),
 		},
 		Some(Commands::Convert { action }) => match action {
 			ConvertAction::Makefile { path } => cmd_utilities::cmd_convert_makefile(path),

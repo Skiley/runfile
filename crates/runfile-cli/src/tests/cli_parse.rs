@@ -122,6 +122,33 @@ fn cli_parses_generate_jetbrains_with_output_dir() {
 }
 
 #[test]
+fn cli_parses_generate_vscode_tasks_stdout() {
+	let result = try_parse(&["run", ":generate", "vscode-tasks", "--stdout"]);
+	assert!(
+		result.is_ok(),
+		"failed to parse ':generate vscode-tasks --stdout': {result:?}"
+	);
+}
+
+#[test]
+fn cli_parses_generate_zed_tasks_stdout() {
+	let result = try_parse(&["run", ":generate", "zed-tasks", "--stdout"]);
+	assert!(
+		result.is_ok(),
+		"failed to parse ':generate zed-tasks --stdout': {result:?}"
+	);
+}
+
+#[test]
+fn cli_parses_generate_jetbrains_stdout() {
+	let result = try_parse(&["run", ":generate", "jetbrains-run-configurations", "--stdout"]);
+	assert!(
+		result.is_ok(),
+		"failed to parse ':generate jetbrains-run-configurations --stdout': {result:?}"
+	);
+}
+
+#[test]
 fn cli_rejects_generate_without_subcommand() {
 	let result = try_parse(&["run", ":generate"]);
 	assert!(result.is_err(), ":generate without subcommand should fail");

@@ -1,3 +1,4 @@
+use crate::editorconfig::EditorConfigProps;
 use runfile_parser::{is_internal_target_name, Runfile};
 
 /// A generated JetBrains run configuration.
@@ -39,7 +40,7 @@ pub fn generate_jetbrains_configs(runfile: &Runfile) -> Vec<JetBrainsRunConfig> 
 		.map(|name| {
 			let config_name = prettify_target_name(name);
 			let file_name = format!("Runfile_{}.run.xml", sanitize_file_name(name));
-			let xml = build_jetbrains_run_config(&config_name, name);
+			let xml = build_jetbrains_run_config(&config_name, name, None);
 			JetBrainsRunConfig {
 				config_name,
 				target_name: (*name).clone(),
@@ -117,29 +118,45 @@ fn sanitize_file_name(name: &str) -> String {
 		.collect()
 }
 
-fn build_jetbrains_run_config(config_name: &str, target_name: &str) -> String {
+/// Render a JetBrains run configuration to the exact bytes to write to `.run/<name>.run.xml`,
+/// formatted per the resolved EditorConfig properties: the indentation unit drives the XML
+/// structure and the remaining settings (line endings, trailing whitespace, final newline, BOM)
+/// are applied to the text. With an empty [`EditorConfigProps`] this reproduces the previous
+/// output (2-space indent, LF, trailing newline).
+pub fn render_jetbrains_config(config_name: &str, target_name: &str, props: &EditorConfigProps) -> Vec<u8> {
+	let indent = props.indent_unit();
+	let xml = build_jetbrains_run_config(config_name, target_name, indent.as_deref());
+	props.apply(&xml)
+}
+
+fn build_jetbrains_run_config(config_name: &str, target_name: &str, indent: Option<&str>) -> String {
 	// `--stdin-args` makes Runfile prompt for any unsupplied {{ ARG.x }} /
 	// {{ ENV.X }} / {{ FLAG.x }} value via stdin. Run configurations are static
 	// (no per-invocation parameter UI), so without the flag a target with a
 	// required arg would just fail. The flag is a no-op when nothing's
 	// missing, so it's safe to always include.
+	//
+	// `i1` is one indentation level (the `<configuration>` element), `i2` is two (its
+	// `<option>` children); both default to two spaces to match historical output.
+	let i1 = indent.unwrap_or("  ");
+	let i2 = format!("{i1}{i1}");
 	format!(
 		r#"<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="{config_name}" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="run --stdin-args {target_name}" />
-    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
-    <option name="SCRIPT_PATH" value="" />
-    <option name="SCRIPT_OPTIONS" value="" />
-    <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
-    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-    <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
-    <option name="INTERPRETER_PATH" value="" />
-    <option name="INTERPRETER_OPTIONS" value="" />
-    <option name="EXECUTE_IN_TERMINAL" value="false" />
-    <option name="EXECUTE_SCRIPT_FILE" value="false" />
-    <envs />
-    <method v="2" />
-  </configuration>
+{i1}<configuration default="false" name="{config_name}" type="ShConfigurationType">
+{i2}<option name="SCRIPT_TEXT" value="run --stdin-args {target_name}" />
+{i2}<option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+{i2}<option name="SCRIPT_PATH" value="" />
+{i2}<option name="SCRIPT_OPTIONS" value="" />
+{i2}<option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+{i2}<option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+{i2}<option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+{i2}<option name="INTERPRETER_PATH" value="" />
+{i2}<option name="INTERPRETER_OPTIONS" value="" />
+{i2}<option name="EXECUTE_IN_TERMINAL" value="false" />
+{i2}<option name="EXECUTE_SCRIPT_FILE" value="false" />
+{i2}<envs />
+{i2}<method v="2" />
+{i1}</configuration>
 </component>
 "#
 	)

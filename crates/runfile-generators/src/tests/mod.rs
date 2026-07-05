@@ -37,6 +37,7 @@ fn make_runfile_with_excluded(targets: Vec<(&str, Vec<&str>)>, excluded: &[&str]
 }
 
 mod coverage;
+mod editorconfig;
 mod exclude_metadata;
 mod internal_targets;
 mod jetbrains;

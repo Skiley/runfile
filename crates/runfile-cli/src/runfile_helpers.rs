@@ -202,12 +202,17 @@ pub fn write_runfile_to_path(runfile: &Runfile, path: &std::path::Path) {
 	}
 	map.insert("targets".to_string(), serde_json::to_value(&sorted_targets).unwrap());
 
-	let json = serde_json::to_string_pretty(&map).unwrap_or_else(|e| {
-		eprintln!("Error serializing {RUNFILE_NAME}: {e}");
-		process::exit(1);
-	});
+	// Format the written Runfile to match the project's .editorconfig for this path (indentation,
+	// line endings, final newline, trailing whitespace, BOM). Falls back to the historical
+	// 2-space / LF / no-trailing-newline output when no applicable settings exist.
+	let props = runfile_generators::EditorConfigProps::resolve_for_path(path);
+	let json =
+		runfile_generators::serialize_json_with_indent(&map, props.indent_unit().as_deref()).unwrap_or_else(|e| {
+			eprintln!("Error serializing {RUNFILE_NAME}: {e}");
+			process::exit(1);
+		});
 
-	std::fs::write(path, json.as_bytes()).unwrap_or_else(|e| {
+	std::fs::write(path, props.apply(&json)).unwrap_or_else(|e| {
 		eprintln!("Error writing {}: {e}", path.display());
 		process::exit(1);
 	});
