@@ -1242,6 +1242,21 @@ Env values can be strings, numbers, or booleans (all converted to strings at run
   file per target, so `--stdout` emits each config's XML and — only when there's more than one — prefixes each with
   a `<!-- <run_dir>/<file> -->` comment delimiter (a single config is emitted verbatim for a clean redirect into a
   `.run.xml`). The non-`--stdout` path is unchanged.
+- **`--include-namespaces` on all three `:generate` subcommands** (a per-subcommand `bool` flag, default off; in
+  `main.rs`'s `GenerateAction` variants, threaded through to each `cmd_generate_*`). By default the generators
+  operate on the local Runfile's own targets only (single-file parse). With the flag, they operate on the local
+  Runfile *with its `includes` resolved* — namespaced included targets carry their `namespace:` prefixes exactly
+  as `run :list` shows them (e.g. `api:build`), and plain (un-namespaced) includes contribute their targets
+  verbatim. The resolution goes through the shared `runfile_helpers::runfile_for_generate(file, include_namespaces)`
+  helper: it always parses the local Runfile (respecting `-f`/`--file`, path aliases, `RUNFILE_TARGET`); when the
+  flag is set it additionally runs `merge_runfiles(Some((runfile, path)), &[], &cwd)` — an **empty** global-file
+  slice, so **global user-level Runfiles are deliberately never pulled in** (generated editor configs stay
+  scoped to the project) — and returns `MergeResult.runfile`. Conflicting targets (defined in multiple files) are
+  dropped by the merge, so they never reach the generators. The generators themselves are unchanged: they iterate
+  `runfile.targets` regardless of source, and JetBrains' `sanitize_file_name` already maps the `:` in namespaced
+  names to `_` for the on-disk `Runfile_api_deploy.run.xml` filename while the `run --stdin-args api:deploy`
+  invocation keeps the prefix. Composes with `--stdout` (each handler resolves the Runfile once, before branching
+  on `stdout`). The non-flag path is byte-for-byte unchanged.
 - All three editor generators (`vscode`, `zed`, `jetbrains-run-configurations`) inject `--stdin-args` into the
   generated invocation. Editor run configs are static (no per-invocation arg prompt UI built into the IDE), so
   `--stdin-args` is what lets a static config still cover targets that need user input — missing `{{ ARG.x }}` /

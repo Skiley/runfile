@@ -179,6 +179,10 @@ enum GenerateAction {
 		/// Print the generated run configurations to stdout instead of writing them to disk
 		#[arg(long = "stdout")]
 		stdout: bool,
+		/// Also generate configurations for targets pulled in via `includes` (namespaced targets
+		/// carry their `namespace:` prefixes, just like `run :list`)
+		#[arg(long = "include-namespaces")]
+		include_namespaces: bool,
 	},
 	/// Generate VS Code tasks from Runfile targets
 	VscodeTasks {
@@ -188,6 +192,10 @@ enum GenerateAction {
 		/// Print the generated tasks to stdout instead of writing them to disk
 		#[arg(long = "stdout")]
 		stdout: bool,
+		/// Also generate tasks for targets pulled in via `includes` (namespaced targets carry
+		/// their `namespace:` prefixes, just like `run :list`)
+		#[arg(long = "include-namespaces")]
+		include_namespaces: bool,
 	},
 	/// Generate Zed editor tasks from Runfile targets
 	ZedTasks {
@@ -197,6 +205,10 @@ enum GenerateAction {
 		/// Print the generated tasks to stdout instead of writing them to disk
 		#[arg(long = "stdout")]
 		stdout: bool,
+		/// Also generate tasks for targets pulled in via `includes` (namespaced targets carry
+		/// their `namespace:` prefixes, just like `run :list`)
+		#[arg(long = "include-namespaces")]
+		include_namespaces: bool,
 	},
 }
 
@@ -475,15 +487,27 @@ fn main() {
 			CompletionsAction::Output { shell } => completions::cmd_completions_output(&shell),
 		},
 		Some(Commands::Generate { action }) => match action {
-			GenerateAction::ZedTasks { file, stdout } => cmd_utilities::cmd_generate_zed_tasks(file.as_deref(), stdout),
+			GenerateAction::ZedTasks {
+				file,
+				stdout,
+				include_namespaces,
+			} => cmd_utilities::cmd_generate_zed_tasks(file.as_deref(), stdout, include_namespaces),
 			GenerateAction::JetbrainsRunConfigurations {
 				file,
 				output_dir,
 				stdout,
-			} => cmd_utilities::cmd_generate_jetbrains_run_configs(file.as_deref(), output_dir.as_deref(), stdout),
-			GenerateAction::VscodeTasks { file, stdout } => {
-				cmd_utilities::cmd_generate_vscode_tasks(file.as_deref(), stdout)
-			}
+				include_namespaces,
+			} => cmd_utilities::cmd_generate_jetbrains_run_configs(
+				file.as_deref(),
+				output_dir.as_deref(),
+				stdout,
+				include_namespaces,
+			),
+			GenerateAction::VscodeTasks {
+				file,
+				stdout,
+				include_namespaces,
+			} => cmd_utilities::cmd_generate_vscode_tasks(file.as_deref(), stdout, include_namespaces),
 		},
 		Some(Commands::Convert { action }) => match action {
 			ConvertAction::Makefile { path } => cmd_utilities::cmd_convert_makefile(path),

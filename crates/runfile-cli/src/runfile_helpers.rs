@@ -125,6 +125,42 @@ pub fn resolve_and_merge(file: Option<&std::path::Path>) -> MergeResult {
 	}
 }
 
+/// Build the Runfile the `:generate` commands should operate on.
+///
+/// Always parses the local Runfile (respecting `-f`/`--file`, path aliases, and
+/// `RUNFILE_TARGET`). When `include_namespaces` is false, only that file's own
+/// targets are used — the historical single-file behavior. When true, the file's
+/// `includes` are resolved and merged so included targets (namespaced ones carry
+/// the same `namespace:` prefixes `run :list` shows) are added to the target set.
+///
+/// Global user-level files are deliberately never pulled in — generated editor
+/// configs stay scoped to the project's own Runfile and its includes. Conflicting
+/// targets (defined in multiple files) are dropped by the merge, exactly as they
+/// are for `run :list`, so they never reach the generators.
+pub fn runfile_for_generate(file: Option<&std::path::Path>, include_namespaces: bool) -> Runfile {
+	let runfile_path = resolve_runfile_path(file);
+	let runfile = match parse_runfile_from_path(&runfile_path) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("Error parsing {}: {e}", runfile_path.display());
+			process::exit(1);
+		}
+	};
+
+	if !include_namespaces {
+		return runfile;
+	}
+
+	let cwd = std::env::current_dir().unwrap_or_default();
+	match merge_runfiles(Some((runfile, runfile_path)), &[], &cwd) {
+		Ok(result) => result.runfile,
+		Err(e) => {
+			eprintln!("Error: {e}");
+			process::exit(1);
+		}
+	}
+}
+
 /// Helper to get the local runfile dir from a MergeResult's target_sources.
 pub fn local_dir_from_merge(result: &MergeResult) -> PathBuf {
 	// Find any Local source and use its parent dir

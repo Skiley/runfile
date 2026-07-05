@@ -168,6 +168,138 @@ fn generate_jetbrains_stdout_honors_output_dir_in_header() {
 	assert!(!root.join(".idea").exists(), "--stdout must not create the output dir");
 }
 
+// ── :generate --include-namespaces pulls in included/namespaced targets ──
+
+/// A root Runfile that includes a sub-Runfile under the `api` namespace, plus a
+/// plain (un-namespaced) include. Written into `dir` alongside the two includes.
+fn write_namespaced_project(root: &Path) {
+	write(
+		&root.join("Runfile.json"),
+		r#"{
+			"$schema": "x",
+			"includes": [
+				{ "path": "api/Runfile.json", "namespace": "api" },
+				"shared/Runfile.json"
+			],
+			"targets": { "build": { "commands": ["echo root build"] } }
+		}"#,
+	);
+	write(
+		&root.join("api/Runfile.json"),
+		r#"{ "$schema": "x", "targets": { "deploy": { "commands": ["echo api deploy"] } } }"#,
+	);
+	write(
+		&root.join("shared/Runfile.json"),
+		r#"{ "$schema": "x", "targets": { "clean": { "commands": ["echo shared clean"] } } }"#,
+	);
+}
+
+#[test]
+fn generate_vscode_without_flag_excludes_namespaced_targets() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	write_namespaced_project(root);
+
+	let out = run_in(root, &[":generate", "vscode-tasks", "--stdout"]);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+	let stdout = stdout_of(&out);
+	assert!(
+		stdout.contains("\"label\": \"run build\""),
+		"expected root build:\n{stdout}"
+	);
+	assert!(
+		!stdout.contains("run api:deploy"),
+		"namespaced target must be absent without the flag:\n{stdout}"
+	);
+	assert!(
+		!stdout.contains("run clean"),
+		"included target must be absent without the flag:\n{stdout}"
+	);
+}
+
+#[test]
+fn generate_vscode_stdout_include_namespaces_adds_prefixed_targets() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	write_namespaced_project(root);
+
+	let out = run_in(root, &[":generate", "vscode-tasks", "--stdout", "--include-namespaces"]);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+	let stdout = stdout_of(&out);
+	assert!(
+		stdout.contains("\"label\": \"run build\""),
+		"expected root build:\n{stdout}"
+	);
+	// Namespaced include: target name carries the `api:` prefix.
+	assert!(
+		stdout.contains("\"label\": \"run api:deploy\""),
+		"expected namespaced api:deploy task:\n{stdout}"
+	);
+	// The invocation arg is the prefixed name so `run api:deploy` dispatches correctly.
+	assert!(
+		stdout.contains("\"api:deploy\""),
+		"expected api:deploy invocation arg:\n{stdout}"
+	);
+	// Plain (un-namespaced) include contributes its target verbatim.
+	assert!(
+		stdout.contains("\"label\": \"run clean\""),
+		"expected plain-include clean task:\n{stdout}"
+	);
+	assert!(!root.join(".vscode").exists(), "--stdout must not create .vscode/");
+}
+
+#[test]
+fn generate_vscode_writes_file_with_include_namespaces() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	write_namespaced_project(root);
+
+	let out = run_in(root, &[":generate", "vscode-tasks", "--include-namespaces"]);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+	let tasks = std::fs::read_to_string(root.join(".vscode/tasks.json")).expect(".vscode/tasks.json written");
+	assert!(
+		tasks.contains("\"label\": \"run build\""),
+		"expected root build:\n{tasks}"
+	);
+	assert!(
+		tasks.contains("\"label\": \"run api:deploy\""),
+		"expected namespaced api:deploy task:\n{tasks}"
+	);
+	assert!(
+		tasks.contains("\"label\": \"run clean\""),
+		"expected plain-include clean task:\n{tasks}"
+	);
+}
+
+#[test]
+fn generate_jetbrains_include_namespaces_sanitizes_colon_in_filename() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	write_namespaced_project(root);
+
+	let out = run_in(
+		root,
+		&[":generate", "jetbrains-run-configurations", "--include-namespaces"],
+	);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+	// The colon in `api:deploy` is sanitized to `_` in the filename, but the run
+	// invocation keeps the prefixed name.
+	let cfg = std::fs::read_to_string(root.join(".run/Runfile_api_deploy.run.xml"))
+		.expect(".run/Runfile_api_deploy.run.xml written");
+	assert!(
+		cfg.contains("value=\"run --stdin-args api:deploy\""),
+		"expected namespaced invocation:\n{cfg}"
+	);
+	assert!(
+		root.join(".run/Runfile_build.run.xml").is_file(),
+		"root target config should also exist"
+	);
+}
+
 // ── :generate writes files, honoring .editorconfig ───────────────────────
 
 #[test]

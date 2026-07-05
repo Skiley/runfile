@@ -1,8 +1,8 @@
-use runfile_parser::{parse_runfile_from_path, RUNFILE_NAME};
+use runfile_parser::RUNFILE_NAME;
 use std::path::PathBuf;
 use std::process;
 
-use crate::runfile_helpers::{load_or_create_runfile, resolve_runfile_path, write_runfile};
+use crate::runfile_helpers::{load_or_create_runfile, runfile_for_generate, write_runfile};
 
 /// Minimal starter Runfile written by `:init`. A single `hello` target
 /// running `echo Hello World` — works identically on every supported shell
@@ -207,20 +207,12 @@ fn write_generated_to_stdout(bytes: &[u8]) {
 	}
 }
 
-pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>, stdout: bool) {
+pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>, stdout: bool, include_namespaces: bool) {
 	use runfile_generators::{
 		generate_vscode_tasks, merge_vscode_tasks, render_vscode_tasks, EditorConfigProps, VsCodeTasksFile,
 	};
 
-	let runfile_path = resolve_runfile_path(file);
-
-	let runfile = match parse_runfile_from_path(&runfile_path) {
-		Ok(r) => r,
-		Err(e) => {
-			eprintln!("Error parsing {}: {e}", runfile_path.display());
-			process::exit(1);
-		}
-	};
+	let runfile = runfile_for_generate(file, include_namespaces);
 
 	let tasks_path = PathBuf::from(".vscode/tasks.json");
 
@@ -311,18 +303,10 @@ pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>, stdout: bool) {
 	}
 }
 
-pub fn cmd_generate_zed_tasks(file: Option<&std::path::Path>, stdout: bool) {
+pub fn cmd_generate_zed_tasks(file: Option<&std::path::Path>, stdout: bool, include_namespaces: bool) {
 	use runfile_generators::{generate_zed_tasks, merge_zed_tasks, render_zed_tasks, EditorConfigProps, ZedTask};
 
-	let runfile_path = resolve_runfile_path(file);
-
-	let runfile = match parse_runfile_from_path(&runfile_path) {
-		Ok(r) => r,
-		Err(e) => {
-			eprintln!("Error parsing {}: {e}", runfile_path.display());
-			process::exit(1);
-		}
-	};
+	let runfile = runfile_for_generate(file, include_namespaces);
 
 	let tasks_path = PathBuf::from(".zed/tasks.json");
 
@@ -408,6 +392,7 @@ pub fn cmd_generate_jetbrains_run_configs(
 	file: Option<&std::path::Path>,
 	output_dir: Option<&std::path::Path>,
 	stdout: bool,
+	include_namespaces: bool,
 ) {
 	use runfile_generators::{
 		check_existing_jetbrains_config, generate_jetbrains_configs, is_jetbrains_config_ours, render_jetbrains_config,
@@ -415,15 +400,7 @@ pub fn cmd_generate_jetbrains_run_configs(
 	};
 	use std::collections::HashSet;
 
-	let runfile_path = resolve_runfile_path(file);
-
-	let runfile = match parse_runfile_from_path(&runfile_path) {
-		Ok(r) => r,
-		Err(e) => {
-			eprintln!("Error parsing {}: {e}", runfile_path.display());
-			process::exit(1);
-		}
-	};
+	let runfile = runfile_for_generate(file, include_namespaces);
 
 	let run_dir = output_dir.map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".run"));
 
