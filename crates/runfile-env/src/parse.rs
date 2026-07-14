@@ -43,9 +43,16 @@ pub fn parse_env_file(content: &str) -> Result<Vec<(String, String)>, (usize, St
 
 		let raw_value = trimmed[eq_pos + 1..].trim();
 
-		// Check for quoted multi-line values
-		if (raw_value.starts_with('"') && !ends_with_unescaped_quote(raw_value, '"'))
-			|| (raw_value.starts_with('\'') && !ends_with_unescaped_quote(raw_value, '\''))
+		// Check for quoted multi-line values. A value is multi-line ONLY when it
+		// opens with a quote that has no matching close on the same line — i.e.
+		// `find_closing_quote` returns `None`. A quoted value with trailing
+		// content (e.g. `URL="https://x" # comment`) DOES have a closing quote,
+		// so it stays on the single-line path and its trailing text/comment is
+		// handled there. Keying off "ends with a quote" instead wrongly treated
+		// any quoted-value-with-trailing-content as unterminated and swallowed
+		// following lines into the value.
+		if (raw_value.starts_with('"') && find_closing_quote(&raw_value[1..], '"').is_none())
+			|| (raw_value.starts_with('\'') && find_closing_quote(&raw_value[1..], '\'').is_none())
 		{
 			let quote_char = raw_value.as_bytes()[0] as char;
 			let mut value = raw_value[1..].to_string(); // skip opening quote
@@ -81,30 +88,6 @@ pub fn parse_env_file(content: &str) -> Result<Vec<(String, String)>, (usize, St
 	}
 
 	Ok(result)
-}
-
-/// Check if a string ends with an unescaped quote character.
-/// For a string starting with a quote, checks if there's a matching closing quote.
-fn ends_with_unescaped_quote(s: &str, quote: char) -> bool {
-	if s.len() < 2 {
-		return false;
-	}
-	// The string starts with the quote char; check if it ends with the same
-	// and the ending quote is not escaped
-	let bytes = s.as_bytes();
-	if bytes[bytes.len() - 1] != quote as u8 {
-		return false;
-	}
-	// Count preceding backslashes
-	let mut backslash_count = 0;
-	for j in (1..bytes.len() - 1).rev() {
-		if bytes[j] == b'\\' {
-			backslash_count += 1;
-		} else {
-			break;
-		}
-	}
-	backslash_count % 2 == 0
 }
 
 /// Find the position of a closing quote in a line.

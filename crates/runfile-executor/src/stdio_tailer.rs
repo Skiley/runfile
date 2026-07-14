@@ -114,29 +114,38 @@ fn read_new_lines(path: &PathBuf, pos: u64, line_buf: &mut String, stream: &Stdi
 	}
 
 	let mut new_pos = seek_pos;
-	let mut buf = String::new();
+	let mut buf: Vec<u8> = Vec::new();
 
 	loop {
 		buf.clear();
-		match reader.read_line(&mut buf) {
+		// Read BYTES up to and including the next `\n` (or EOF). Using
+		// `read_line` into a `String` returns `Err(InvalidData)` on a non-UTF-8
+		// byte, and the previous `Err(_) => break` arm left `new_pos` unadvanced
+		// — so every subsequent poll re-hit the same offset and the tailer
+		// stalled forever, never emitting later lines. `read_until` is byte-based
+		// and never errors on invalid UTF-8; we lossily decode for display. `\n`
+		// (0x0A) never appears inside a multi-byte UTF-8 sequence, so a complete
+		// line always ends on a character boundary.
+		match reader.read_until(b'\n', &mut buf) {
 			Ok(0) => break, // EOF
 			Ok(n) => {
 				new_pos += n as u64;
-				if buf.ends_with('\n') {
+				let text = String::from_utf8_lossy(&buf);
+				if buf.ends_with(b"\n") {
 					// Complete line — prepend any buffered partial content
 					if !line_buf.is_empty() {
 						let mut full = std::mem::take(line_buf);
-						full.push_str(&buf);
+						full.push_str(&text);
 						write_to_stream(stream, &full);
 					} else {
-						write_to_stream(stream, &buf);
+						write_to_stream(stream, &text);
 					}
 				} else {
 					// Incomplete line — buffer it
-					line_buf.push_str(&buf);
+					line_buf.push_str(&text);
 				}
 			}
-			Err(_) => break,
+			Err(_) => break, // genuine IO error — retry on the next poll
 		}
 	}
 
@@ -155,5 +164,35 @@ fn write_to_stream(stream: &StdioStream, data: &str) {
 			let _ = err.write_all(data.as_bytes());
 			let _ = err.flush();
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::io::Write;
+
+	#[test]
+	fn read_new_lines_advances_past_invalid_utf8() {
+		// Audit L10: an invalid-UTF-8 line followed by a valid one. The byte-based
+		// tailer must consume the whole file (advancing the offset) instead of
+		// stalling at the bad byte forever, as the old `read_line`-into-`String`
+		// path did (it errored and left the position unadvanced).
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("log.txt");
+		let mut f = std::fs::File::create(&path).unwrap();
+		f.write_all(b"bad\xFFline\ngood line\n").unwrap();
+		f.flush().unwrap();
+
+		let path_buf: PathBuf = path.clone();
+		let mut line_buf = String::new();
+		let new_pos = read_new_lines(&path_buf, 0, &mut line_buf, &StdioStream::Stdout);
+
+		let file_len = std::fs::metadata(&path).unwrap().len();
+		assert_eq!(new_pos, file_len, "tailer must advance past the invalid-UTF-8 line");
+		assert!(
+			line_buf.is_empty(),
+			"both lines were complete; nothing should be buffered"
+		);
 	}
 }

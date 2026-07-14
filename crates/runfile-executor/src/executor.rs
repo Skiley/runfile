@@ -567,6 +567,11 @@ pub fn execute_same_shell_with_counter(
 	let mut cmd = Command::new(&shell.path);
 	let spawn_cwd = args.spawn_cwd(working_dir);
 	cmd.args(&shell_args).envs(&setup.env).current_dir(&spawn_cwd);
+	// forceKillOnSigInt: put the child in its own process group (before spawn)
+	// so a Ctrl+C force-kill reaches its descendants too.
+	if let Some(guard) = force_kill_guard.as_ref() {
+		guard.prepare_command(&mut cmd);
+	}
 
 	let status = if let Some(prefix) = setup.output_prefix.as_deref() {
 		// Inherited from a parallel ancestor: pipe stdio + line-prefix the output.
@@ -918,6 +923,11 @@ fn execute_one_shell(
 	// `working_dir` when no override is set).
 	let spawn_cwd = args.spawn_cwd(working_dir);
 	cmd.args(&shell_args).envs(&setup.env).current_dir(&spawn_cwd);
+	// forceKillOnSigInt: put the child in its own process group (before spawn)
+	// so a Ctrl+C force-kill reaches its descendants too.
+	if let Some(guard) = force_kill_guard {
+		guard.prepare_command(&mut cmd);
+	}
 
 	let status = if let Some(prefix) = setup.output_prefix.as_deref() {
 		// Inherited from a parallel ancestor: pipe stdout/stderr and route
@@ -1523,19 +1533,61 @@ impl ProcessTreeTracker {
 		self.write_end.take(); // Drop closes the FD
 	}
 
-	/// Block until every process that inherited the sentinel pipe has exited.
+	/// Block until every process that inherited the sentinel pipe has exited
+	/// (the pipe reaches EOF when the last write-end holder closes).
+	///
+	/// Uses `poll()` in an EINTR-safe loop — the previous bare `libc::read`
+	/// ignored its return value, so a signal (e.g. this run's own SIGINT
+	/// handler, installed without `SA_RESTART`) could make it return before real
+	/// EOF. `RUNFILE_DESCENDANT_WAIT_MS`, when set to a positive integer, caps
+	/// the total wait so an inherited long-lived daemon (which keeps the pipe
+	/// open indefinitely) can't hang the CLI forever; unset/0 blocks until the
+	/// pipe closes (the default, preserving prior behavior).
 	pub(crate) fn wait_for_descendants(&self) {
-		if let Some(ref read_end) = self.read_end {
-			// File::read needs &mut, but we can borrow via the OS fd
-			let fd = {
-				use std::os::unix::io::AsRawFd;
-				read_end.as_raw_fd()
+		let Some(ref read_end) = self.read_end else {
+			return;
+		};
+		use std::os::unix::io::AsRawFd;
+		let fd = read_end.as_raw_fd();
+
+		let cap_ms: Option<u64> = std::env::var("RUNFILE_DESCENDANT_WAIT_MS")
+			.ok()
+			.and_then(|s| s.trim().parse::<u64>().ok())
+			.filter(|&n| n > 0);
+
+		let start = std::time::Instant::now();
+		loop {
+			let timeout_ms: i32 = match cap_ms {
+				None => -1, // block indefinitely
+				Some(cap) => {
+					let elapsed = start.elapsed().as_millis() as u64;
+					if elapsed >= cap {
+						return;
+					}
+					(cap - elapsed).min(i32::MAX as u64) as i32
+				}
 			};
-			let mut buf = [0u8; 1];
-			// This blocks until EOF (all write-end holders have exited)
-			unsafe {
-				libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 1);
+			let mut pfd = libc::pollfd {
+				fd,
+				events: libc::POLLIN,
+				revents: 0,
+			};
+			let rc = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+			if rc < 0 {
+				// EINTR → retry (recompute remaining time); any other error →
+				// stop waiting rather than spin.
+				if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+					continue;
+				}
+				return;
 			}
+			if rc == 0 {
+				return; // timed out (only reachable when a cap is set)
+			}
+			// Readable → EOF (all write-end holders closed). Drain and finish.
+			let mut buf = [0u8; 1];
+			let _ = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 1) };
+			return;
 		}
 	}
 }
@@ -1553,6 +1605,17 @@ impl ProcessTreeTracker {
 		Self { job_handle: handle }
 	}
 
+	// KNOWN LIMITATION (audit L14): the child is assigned to the job AFTER
+	// `Command::spawn` returns, so a grandchild forked in the window between
+	// spawn and assignment escapes the job (and thus `TerminateJobObject` /
+	// `wait_for_descendants`). Closing this window requires the child to start
+	// INSIDE the job atomically — either spawn `CREATE_SUSPENDED`, assign, then
+	// resume the main thread, or create it with `PROC_THREAD_ATTRIBUTE_JOB_LIST`
+	// — both of which need raw `CreateProcessW`, not `std::process::Command`.
+	// That is a Windows-only rewrite that can't be compiled/tested from this
+	// (Linux) environment, so it is intentionally deferred rather than shipped
+	// unverified. In practice the window is microseconds and the shell child
+	// takes far longer to fork its own children, so the race rarely fires.
 	pub(crate) fn add_child(&self, child: &std::process::Child) {
 		if self.job_handle.is_null() {
 			return;

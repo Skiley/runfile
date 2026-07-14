@@ -85,7 +85,9 @@ pub fn cmd_decrypt_file(source: Option<&str>, output: Option<&str>) {
 
 	match output {
 		Some(path) => {
-			if let Err(e) = std::fs::write(path, &out_content) {
+			// Decrypted plaintext to disk — restrict to 0600 (Unix) so the
+			// secrets aren't left world-readable on a shared host.
+			if let Err(e) = write_secret_file(path, out_content.as_bytes()) {
 				eprintln!("Error writing {path}: {e}");
 				process::exit(1);
 			}

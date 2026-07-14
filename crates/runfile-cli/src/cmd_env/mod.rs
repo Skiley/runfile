@@ -218,12 +218,31 @@ pub fn cmd_set(file: &str, var: &str, value: Option<&str>, plain: bool) {
 
 	let new_content = set_env_line(&content, var, &final_value);
 
-	if let Err(e) = std::fs::write(path, &new_content) {
+	// 0600 on Unix — a `.env` written by `:env set` may hold plaintext secrets
+	// (especially with `--plain`), so don't leave it group/other-readable.
+	if let Err(e) = write_secret_file(path, new_content.as_bytes()) {
 		eprintln!("Error writing {file}: {e}");
 		process::exit(1);
 	}
 
 	println!("{var} set in {file}");
+}
+
+/// Write `content` to `path`, restricting the file to owner read/write only
+/// (mode 0600) on Unix. Used for files that may hold secrets — decrypted `.env`
+/// output and `:env set` rewrites — so they are not left group/other-readable
+/// (the default `0644` under a typical umask) on a shared host. On non-Unix
+/// platforms this is a plain write. The permission is set after the write so a
+/// freshly-created file never has a wider-permission window.
+pub(crate) fn write_secret_file(path: impl AsRef<Path>, content: &[u8]) -> std::io::Result<()> {
+	let path = path.as_ref();
+	std::fs::write(path, content)?;
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+		std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+	}
+	Ok(())
 }
 
 /// Drops any key from `env_map` that the parent process already defines, so that
@@ -503,6 +522,28 @@ mod tests {
 		assert!(result.contains("# Database config"));
 		assert!(result.contains("DB_HOST=remote"));
 		assert!(result.contains("# End"));
+	}
+
+	// ── Audit M3: secret files written owner-only (0600) ──
+
+	#[cfg(unix)]
+	#[test]
+	fn write_secret_file_sets_owner_only_permissions() {
+		use std::os::unix::fs::PermissionsExt;
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("secret.env");
+		write_secret_file(&path, b"TOKEN=s3cret\n").unwrap();
+		let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+		assert_eq!(mode, 0o600, "decrypted / secret output must be owner-only (0600)");
+		assert_eq!(std::fs::read_to_string(&path).unwrap(), "TOKEN=s3cret\n");
+	}
+
+	#[test]
+	fn write_secret_file_writes_content() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("out.env");
+		write_secret_file(&path, b"A=1\n").unwrap();
+		assert_eq!(std::fs::read_to_string(&path).unwrap(), "A=1\n");
 	}
 
 	#[test]

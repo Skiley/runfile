@@ -129,7 +129,31 @@ pub fn render_jetbrains_config(config_name: &str, target_name: &str, props: &Edi
 	props.apply(&xml)
 }
 
+/// Escape a string for safe inclusion in a double-quoted XML attribute value.
+/// Target names are only forbidden from starting with `:`, containing `?`, or
+/// being empty, so `"`, `<`, `>`, `&` are all valid in a name — and a name
+/// carrying a `"` would otherwise break out of the `value="…"` attribute and
+/// inject arbitrary `<option>` / `<configuration>` XML (attacker-controlled
+/// `SCRIPT_TEXT` that the IDE would execute). Reachable via `:convert` of an
+/// untrusted Makefile / package.json.
+fn xml_escape_attr(s: &str) -> String {
+	let mut out = String::with_capacity(s.len());
+	for c in s.chars() {
+		match c {
+			'&' => out.push_str("&amp;"),
+			'<' => out.push_str("&lt;"),
+			'>' => out.push_str("&gt;"),
+			'"' => out.push_str("&quot;"),
+			'\'' => out.push_str("&apos;"),
+			_ => out.push(c),
+		}
+	}
+	out
+}
+
 fn build_jetbrains_run_config(config_name: &str, target_name: &str, indent: Option<&str>) -> String {
+	let config_name = xml_escape_attr(config_name);
+	let target_name = xml_escape_attr(target_name);
 	// `--stdin-args` makes Runfile prompt for any unsupplied {{ ARG.x }} /
 	// {{ ENV.X }} / {{ FLAG.x }} value via stdin. Run configurations are static
 	// (no per-invocation parameter UI), so without the flag a target with a

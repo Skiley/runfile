@@ -602,3 +602,68 @@ fn parse_ignore_errors_on_globals() {
 	let rf = parse_runfile(json).unwrap();
 	assert_eq!(rf.globals.unwrap().ignore_errors, Some(true));
 }
+
+// ── Audit M5: nesting-depth guard against a stack-overflow crash ──
+// json5 deserialization is recursive, so a small but deeply-nested command
+// tree used to abort the process (`exit 134`). The pre-parse depth scan now
+// rejects it with a clean error instead.
+
+/// Build a Runfile whose single target nests `if`/`then` `depth` levels deep.
+fn nested_if_runfile(depth: usize) -> String {
+	// Built ITERATIVELY (innermost outward) so constructing the test input
+	// doesn't itself recurse `depth` deep and overflow the stack.
+	let mut body = "\"echo done\"".to_string();
+	for _ in 0..depth {
+		body = format!(r#"{{"if":"{{{{ RUN.os == 'linux' }}}}","then":[{body}]}}"#);
+	}
+	format!(r#"{{"$schema":"x","targets":{{"t":{{"commands":[{body}]}}}}}}"#)
+}
+
+#[test]
+fn deeply_nested_command_tree_is_rejected_not_crashed() {
+	// 200 `if` levels => ~400 structural `{`/`[` levels, well over the cap.
+	let json = nested_if_runfile(200);
+	let err = parse_runfile(&json).unwrap_err();
+	assert!(
+		matches!(err, ParseError::MaxNestingDepthExceeded(_)),
+		"expected MaxNestingDepthExceeded, got {err:?}"
+	);
+}
+
+#[test]
+fn extremely_deeply_nested_tree_does_not_stack_overflow() {
+	// The whole point of the fix: a pathological file (which previously aborted
+	// the process during json5 deserialization) returns a clean Err.
+	let json = nested_if_runfile(20_000);
+	assert!(matches!(
+		parse_runfile(&json).unwrap_err(),
+		ParseError::MaxNestingDepthExceeded(_)
+	));
+}
+
+#[test]
+fn moderately_nested_command_tree_still_parses() {
+	// Well under the cap — must still parse successfully.
+	let json = nested_if_runfile(20);
+	assert!(parse_runfile(&json).is_ok(), "20 levels deep should parse fine");
+}
+
+#[test]
+fn braces_inside_strings_and_comments_do_not_count_toward_depth() {
+	// The depth scanner must skip `{`/`[` inside string literals and comments,
+	// otherwise a legitimate file with brace-heavy command text would be
+	// wrongly rejected.
+	let mut cmds = String::new();
+	for i in 0..300 {
+		if i > 0 {
+			cmds.push(',');
+		}
+		// Each command string is full of braces/brackets but adds NO structural depth.
+		cmds.push_str("\"echo {{ RUN.os }} [{[]}] // { not a block\"");
+	}
+	let json = format!(r#"{{"$schema":"x","targets":{{"t":{{"commands":[{cmds}]}}}}}}"#);
+	assert!(
+		parse_runfile(&json).is_ok(),
+		"braces inside strings must not trip the nesting-depth guard"
+	);
+}

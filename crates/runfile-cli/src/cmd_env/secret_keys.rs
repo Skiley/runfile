@@ -78,11 +78,15 @@ pub fn cmd_secret_keys_add(key_arg: Option<&str>) {
 			eprint!("Paste your private key (64-character hex string): ");
 			io::stderr().flush().unwrap_or(());
 
-			let mut key_input = String::new();
-			if stdin.lock().read_line(&mut key_input).is_err() {
-				eprintln!("Error reading input.");
-				process::exit(1);
-			}
+			// Read with terminal echo disabled so the 256-bit key isn't shown on
+			// screen or left in terminal scrollback / logs (audit L4).
+			let key_input = match read_secret_line() {
+				Ok(s) => s,
+				Err(_) => {
+					eprintln!("Error reading input.");
+					process::exit(1);
+				}
+			};
 			let k = key_input.trim().to_string();
 			if k.len() != 64 || hex::decode(&k).is_err() {
 				eprintln!("Error: key must be a 64-character hex string (256-bit AES key).");
@@ -188,4 +192,116 @@ pub fn cmd_get_private_key(public_prefix: &str) {
 	eprintln!("To import this key on another machine:");
 	eprintln!("  run :env secret-keys add");
 	eprintln!("  (then paste the private key when prompted)");
+}
+
+/// Read a line from stdin with terminal echo disabled when stdin is a TTY, so a
+/// pasted private key is not echoed to the screen or captured in scrollback.
+/// Falls back to a normal (echoing) read when echo cannot be toggled — piped
+/// input, a non-interactive stdin, or a platform failure — so scripted use is
+/// unaffected. The returned string includes the trailing newline; callers trim.
+fn read_secret_line() -> std::io::Result<String> {
+	use std::io::BufRead;
+	let echo_disabled = EchoGuard::disable();
+	let mut line = String::new();
+	let res = std::io::stdin().lock().read_line(&mut line);
+	if echo_disabled.is_some() {
+		// The user's Enter was not echoed; emit a newline so following output
+		// starts on a fresh line.
+		eprintln!();
+	}
+	res?;
+	Ok(line)
+}
+
+/// RAII guard that disables terminal input echo for the lifetime of the guard
+/// and restores the prior mode on drop. `disable()` returns `None` when stdin
+/// isn't an interactive terminal (so callers transparently fall back to a plain
+/// read).
+#[cfg(unix)]
+struct EchoGuard {
+	fd: std::os::unix::io::RawFd,
+	prev: libc::termios,
+}
+
+#[cfg(unix)]
+impl EchoGuard {
+	fn disable() -> Option<Self> {
+		use std::os::unix::io::AsRawFd;
+		let fd = std::io::stdin().as_raw_fd();
+		unsafe {
+			if libc::isatty(fd) != 1 {
+				return None;
+			}
+			let mut term: libc::termios = std::mem::zeroed();
+			if libc::tcgetattr(fd, &mut term) != 0 {
+				return None;
+			}
+			let prev = term;
+			term.c_lflag &= !libc::ECHO;
+			if libc::tcsetattr(fd, libc::TCSANOW, &term) != 0 {
+				return None;
+			}
+			Some(EchoGuard { fd, prev })
+		}
+	}
+}
+
+#[cfg(unix)]
+impl Drop for EchoGuard {
+	fn drop(&mut self) {
+		unsafe {
+			libc::tcsetattr(self.fd, libc::TCSANOW, &self.prev);
+		}
+	}
+}
+
+#[cfg(windows)]
+struct EchoGuard {
+	handle: windows_sys::Win32::Foundation::HANDLE,
+	prev: u32,
+}
+
+#[cfg(windows)]
+impl EchoGuard {
+	fn disable() -> Option<Self> {
+		use windows_sys::Win32::System::Console::{
+			GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, STD_INPUT_HANDLE,
+		};
+		unsafe {
+			let handle = GetStdHandle(STD_INPUT_HANDLE);
+			if handle.is_null() {
+				return None;
+			}
+			let mut mode: u32 = 0;
+			// Fails on a non-console handle (e.g. piped stdin) — fall back to a
+			// plain read in that case.
+			if GetConsoleMode(handle, &mut mode) == 0 {
+				return None;
+			}
+			let prev = mode;
+			if SetConsoleMode(handle, mode & !ENABLE_ECHO_INPUT) == 0 {
+				return None;
+			}
+			Some(EchoGuard { handle, prev })
+		}
+	}
+}
+
+#[cfg(windows)]
+impl Drop for EchoGuard {
+	fn drop(&mut self) {
+		unsafe {
+			windows_sys::Win32::System::Console::SetConsoleMode(self.handle, self.prev);
+		}
+	}
+}
+
+#[cfg(not(any(unix, windows)))]
+struct EchoGuard;
+
+#[cfg(not(any(unix, windows)))]
+impl EchoGuard {
+	fn disable() -> Option<Self> {
+		None
+	}
 }

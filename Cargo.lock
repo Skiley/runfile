@@ -1532,6 +1532,7 @@ dependencies = [
  "dirs",
  "globset",
  "hex",
+ "libc",
  "notify",
  "runfile-converters",
  "runfile-crypto",

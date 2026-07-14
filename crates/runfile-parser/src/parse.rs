@@ -11,6 +11,9 @@ pub enum ParseError {
 	#[error("Failed to parse Runfile: {0}")]
 	Json(#[from] json5::Error),
 
+	#[error("Runfile nesting is too deep (exceeds {0} levels of `{{`/`[`) — this guards against a stack-overflow crash from deeply-nested command trees")]
+	MaxNestingDepthExceeded(usize),
+
 	#[error("Empty $schema field — set it to \"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json\" or a schema URL")]
 	EmptySchema,
 
@@ -83,6 +86,15 @@ pub enum ParseError {
 /// huge files that would consume excessive memory during parsing.
 pub const MAX_RUNFILE_SIZE: u64 = 10 * 1024 * 1024;
 
+/// Maximum structural nesting depth (`{` / `[`) allowed in a Runfile. Bounds
+/// the recursion depth of BOTH json5 deserialization and the runtime
+/// command-tree walk, so a deeply-nested `if`/`for`/`match`/`when` tree
+/// surfaces a clean error instead of aborting the process with a stack
+/// overflow. `MAX_RUNFILE_SIZE` bounds bytes, not depth — a ~360 KB file can
+/// nest thousands deep. 256 is far above any realistic hand-written config and
+/// well below the overflow threshold.
+pub const MAX_NESTING_DEPTH: usize = 256;
+
 /// Parse a Runfile from a JSON string.
 ///
 /// Validates structural constraints (non-empty schema, at least one target,
@@ -96,6 +108,7 @@ pub const MAX_RUNFILE_SIZE: u64 = 10 * 1024 * 1024;
 /// runtime evaluation does not need to re-tokenize. Syntax errors in
 /// conditions surface at load time.
 pub fn parse_runfile(json: &str) -> Result<Runfile, ParseError> {
+	check_nesting_depth(json)?;
 	let mut runfile: Runfile = crate::json::from_json_str(json)?;
 	validate_runfile(&mut runfile, true)?;
 	Ok(runfile)
@@ -115,6 +128,7 @@ pub fn parse_runfile_from_path(path: &Path) -> Result<Runfile, ParseError> {
 /// Same validation as [`parse_runfile`] but allows zero targets, since included
 /// files and global settings may not define any targets of their own.
 pub fn parse_runfile_partial(json: &str) -> Result<Runfile, ParseError> {
+	check_nesting_depth(json)?;
 	let mut runfile: Runfile = crate::json::from_json_str(json)?;
 	validate_runfile(&mut runfile, false)?;
 	Ok(runfile)
@@ -127,6 +141,64 @@ pub fn parse_runfile_from_path_partial(path: &Path) -> Result<Runfile, ParseErro
 	check_file_size(path)?;
 	let content = std::fs::read_to_string(path)?;
 	parse_runfile_partial(&content)
+}
+
+/// Scan raw JSON5 text and reject it when structural nesting (`{` / `[`)
+/// exceeds [`MAX_NESTING_DEPTH`]. This runs BEFORE json5 deserialization —
+/// which is itself recursive and would otherwise overflow the stack on a
+/// pathologically-nested file (a documented DoS: a small, deeply-nested
+/// Runfile aborts the process with `exit 134`). String literals (`"..."` /
+/// `'...'`, honoring `\` escapes) and comments (`//`, `/* */`) are skipped so
+/// braces inside them don't inflate the depth count. Byte-indexed and only
+/// compares ASCII, so multi-byte UTF-8 content is passed through harmlessly.
+fn check_nesting_depth(content: &str) -> Result<(), ParseError> {
+	let bytes = content.as_bytes();
+	let mut i = 0;
+	let mut depth: usize = 0;
+	while i < bytes.len() {
+		match bytes[i] {
+			b'"' | b'\'' => {
+				let quote = bytes[i];
+				i += 1;
+				while i < bytes.len() {
+					match bytes[i] {
+						b'\\' => i += 2, // skip the escaped character
+						b if b == quote => {
+							i += 1;
+							break;
+						}
+						_ => i += 1,
+					}
+				}
+			}
+			b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+				i += 2;
+				while i < bytes.len() && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+				i += 2;
+				while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+					i += 1;
+				}
+				i += 2;
+			}
+			b'{' | b'[' => {
+				depth += 1;
+				if depth > MAX_NESTING_DEPTH {
+					return Err(ParseError::MaxNestingDepthExceeded(MAX_NESTING_DEPTH));
+				}
+				i += 1;
+			}
+			b'}' | b']' => {
+				depth = depth.saturating_sub(1);
+				i += 1;
+			}
+			_ => i += 1,
+		}
+	}
+	Ok(())
 }
 
 /// Check that a file does not exceed the maximum allowed size.

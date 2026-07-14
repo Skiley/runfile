@@ -91,7 +91,16 @@ pub enum DslParseError {
 
 	#[error("Unbalanced parentheses")]
 	UnbalancedParens,
+
+	#[error("Condition is nested too deeply (exceeds {0} levels of parentheses/`!`) — this guards against a stack-overflow crash")]
+	MaxDepthExceeded(usize),
 }
+
+/// Maximum parser recursion depth for a single condition expression. Bounds
+/// nesting of parentheses and unary `!`, so a pathological condition like
+/// `((((…))))` or `!!!!…` surfaces a clean error instead of overflowing the
+/// stack. 128 is far beyond any real condition.
+const MAX_DSL_DEPTH: usize = 128;
 
 /// Parse a condition string into a [`DslExpr`] AST.
 pub fn parse_condition(source: &str) -> Result<DslExpr, DslParseError> {
@@ -101,7 +110,7 @@ pub fn parse_condition(source: &str) -> Result<DslExpr, DslParseError> {
 	}
 	let tokens = tokenize(source)?;
 	let mut parser = Parser { tokens, pos: 0 };
-	let expr = parser.parse_or()?;
+	let expr = parser.parse_or(0)?;
 	if parser.pos < parser.tokens.len() {
 		let tok = &parser.tokens[parser.pos];
 		return Err(DslParseError::Expected(
@@ -385,6 +394,17 @@ fn read_value(source: &str, start: usize) -> Result<(usize, String), DslParseErr
 /// recursively skipped so their inner quotes don't toggle outer state.
 /// Inside `"..."` (verbatim) literals, `{{`/`}}` are literal text.
 fn find_subst_close(s: &str) -> Option<usize> {
+	find_subst_close_depth(s, 0)
+}
+
+fn find_subst_close_depth(s: &str, depth: usize) -> Option<usize> {
+	// Bound recursion on nested `{{ ... }}` so a pathologically nested
+	// substitution inside a condition can't overflow the stack. Exceeding the
+	// cap returns `None`, which the tokenizer surfaces as an
+	// `UnterminatedSubstitution` error — i.e. the input is rejected, not run.
+	if depth > MAX_DSL_DEPTH {
+		return None;
+	}
 	let bytes = s.as_bytes();
 	let mut i = 0usize;
 	let mut in_single = false;
@@ -406,7 +426,7 @@ fn find_subst_close(s: &str) -> Option<usize> {
 			}
 			if b == b'{' && bytes.get(i + 1) == Some(&b'{') {
 				let body_start = i + 2;
-				let close_rel = find_subst_close(&s[body_start..])?;
+				let close_rel = find_subst_close_depth(&s[body_start..], depth + 1)?;
 				i = body_start + close_rel + 2;
 				continue;
 			}
@@ -425,7 +445,7 @@ fn find_subst_close(s: &str) -> Option<usize> {
 		}
 		if b == b'{' && bytes.get(i + 1) == Some(&b'{') {
 			let body_start = i + 2;
-			let close_rel = find_subst_close(&s[body_start..])?;
+			let close_rel = find_subst_close_depth(&s[body_start..], depth + 1)?;
 			i = body_start + close_rel + 2;
 			continue;
 		}
@@ -465,15 +485,18 @@ impl Parser {
 	/// Top-level: a chain of `not` atoms joined by either `&&`s or `||`s
 	/// — but not both in the same level. The caller must use parentheses
 	/// to mix them.
-	fn parse_or(&mut self) -> Result<DslExpr, DslParseError> {
-		let first = self.parse_not()?;
+	fn parse_or(&mut self, depth: usize) -> Result<DslExpr, DslParseError> {
+		if depth > MAX_DSL_DEPTH {
+			return Err(DslParseError::MaxDepthExceeded(MAX_DSL_DEPTH));
+		}
+		let first = self.parse_not(depth)?;
 
 		match self.peek().map(|t| t.kind.clone()) {
 			Some(TokKind::AndAnd) => {
 				let mut parts = vec![first];
 				while matches!(self.peek().map(|t| &t.kind), Some(TokKind::AndAnd)) {
 					self.pos += 1;
-					parts.push(self.parse_not()?);
+					parts.push(self.parse_not(depth)?);
 				}
 				if matches!(self.peek().map(|t| &t.kind), Some(TokKind::OrOr)) {
 					return Err(DslParseError::MixedAndOr);
@@ -484,7 +507,7 @@ impl Parser {
 				let mut parts = vec![first];
 				while matches!(self.peek().map(|t| &t.kind), Some(TokKind::OrOr)) {
 					self.pos += 1;
-					parts.push(self.parse_not()?);
+					parts.push(self.parse_not(depth)?);
 					if matches!(self.peek().map(|t| &t.kind), Some(TokKind::AndAnd)) {
 						return Err(DslParseError::MixedAndOr);
 					}
@@ -495,18 +518,24 @@ impl Parser {
 		}
 	}
 
-	fn parse_not(&mut self) -> Result<DslExpr, DslParseError> {
+	fn parse_not(&mut self, depth: usize) -> Result<DslExpr, DslParseError> {
+		if depth > MAX_DSL_DEPTH {
+			return Err(DslParseError::MaxDepthExceeded(MAX_DSL_DEPTH));
+		}
 		if let Some(tok) = self.peek() {
 			if tok.kind == TokKind::Bang {
 				self.pos += 1;
-				let inner = self.parse_not()?;
+				let inner = self.parse_not(depth + 1)?;
 				return Ok(DslExpr::Not(Box::new(inner)));
 			}
 		}
-		self.parse_atom()
+		self.parse_atom(depth)
 	}
 
-	fn parse_atom(&mut self) -> Result<DslExpr, DslParseError> {
+	fn parse_atom(&mut self, depth: usize) -> Result<DslExpr, DslParseError> {
+		if depth > MAX_DSL_DEPTH {
+			return Err(DslParseError::MaxDepthExceeded(MAX_DSL_DEPTH));
+		}
 		let tok = self
 			.peek()
 			.cloned()
@@ -518,7 +547,7 @@ impl Parser {
 			if matches!(self.peek().map(|t| &t.kind), Some(TokKind::RParen)) {
 				return Err(DslParseError::EmptyParens);
 			}
-			let inner = self.parse_or()?;
+			let inner = self.parse_or(depth + 1)?;
 			match self.eat() {
 				Some(t) if t.kind == TokKind::RParen => Ok(inner),
 				Some(t) => Err(DslParseError::Expected("')'", t.text, t.start)),
@@ -692,6 +721,34 @@ mod dsl_unit_tests {
 			DslParseError::UnbalancedParens | DslParseError::UnexpectedEnd(_) => {}
 			e => panic!("got {e:?}"),
 		}
+	}
+
+	#[test]
+	fn deeply_nested_parens_rejected_not_overflow() {
+		// Audit M5: `((((…x…))))` must surface a clean MaxDepthExceeded error
+		// instead of overflowing the stack in the recursive-descent parser.
+		let expr = format!("{}x{}", "(".repeat(500), ")".repeat(500));
+		assert_eq!(
+			parse_condition(&expr),
+			Err(DslParseError::MaxDepthExceeded(MAX_DSL_DEPTH))
+		);
+	}
+
+	#[test]
+	fn deeply_nested_negation_rejected_not_overflow() {
+		// `!!!!…x` recurses through `parse_not`; must also be depth-bounded.
+		let expr = format!("{}x", "!".repeat(500));
+		assert_eq!(
+			parse_condition(&expr),
+			Err(DslParseError::MaxDepthExceeded(MAX_DSL_DEPTH))
+		);
+	}
+
+	#[test]
+	fn moderately_nested_parens_still_parse() {
+		// Comfortably under the cap — must still parse.
+		let expr = format!("{}x{}", "(".repeat(10), ")".repeat(10));
+		assert!(parse_condition(&expr).is_ok());
 	}
 
 	#[test]

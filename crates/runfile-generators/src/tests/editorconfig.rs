@@ -107,6 +107,48 @@ fn brace_literal_single_group_is_not_expanded() {
 	assert_eq!(expand_braces("a{foo}b"), vec!["a{foo}b"]);
 }
 
+// ── Audit L15: brace-expansion must be bounded (no OOM / stack overflow) ──
+
+#[test]
+fn brace_expand_bounds_combinatorial_blowup() {
+	// 40 binary groups would be 2^40 patterns. Must be capped, not exhaust memory.
+	let pattern = "{a,b}".repeat(40);
+	let result = expand_braces(&pattern);
+	assert!(
+		result.len() <= 1024,
+		"combinatorial expansion must be bounded, got {}",
+		result.len()
+	);
+}
+
+#[test]
+fn brace_expand_bounds_multiplied_ranges() {
+	// Multiplied numeric ranges (the single-range cap doesn't bound their product).
+	let pattern = "{0..500}{0..500}";
+	let result = expand_braces(pattern);
+	assert!(
+		result.len() <= 1024,
+		"multiplied ranges must be bounded, got {}",
+		result.len()
+	);
+}
+
+#[test]
+fn brace_expand_deep_nesting_does_not_overflow() {
+	// Deeply nested groups must not overflow the recursive expander.
+	let pattern = format!("{}z{}", "{a,".repeat(2000), "}".repeat(2000));
+	let result = expand_braces(&pattern);
+	assert!(!result.is_empty(), "deep nesting must terminate and return something");
+}
+
+#[test]
+fn brace_expand_matcher_still_works_after_bounding() {
+	// Regression: normal section matching that relies on expansion is unaffected.
+	assert!(section_matches("*.{json,xml}", ".vscode/tasks.json"));
+	assert!(section_matches("*.{json,xml}", ".run/x.run.xml"));
+	assert!(!section_matches("*.{json,xml}", "notes.txt"));
+}
+
 // ── indent_unit ──────────────────────────────────────────────────────────
 
 #[test]

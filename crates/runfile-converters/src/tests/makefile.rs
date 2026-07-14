@@ -489,3 +489,39 @@ build:
 	assert!(result.targets.contains_key("build"));
 	assert!(!result.targets.contains_key(""));
 }
+
+// ── Audit L16: non-ASCII preserved in variable expansion ──
+
+#[test]
+fn expand_variables_preserves_non_ascii() {
+	use std::collections::HashMap;
+	let mut vars = HashMap::new();
+	vars.insert("NAME".to_string(), "café ☕".to_string());
+	let out = crate::makefile::expand_variables("echo $(NAME) — héllo", &vars);
+	assert_eq!(out, "echo café ☕ — héllo");
+	assert!(!out.contains('Ã'), "no mojibake: {out}");
+}
+
+#[test]
+fn convert_makefile_preserves_non_ascii_command() {
+	let makefile = "greet:\n\techo héllo wörld ☕\n";
+	let result = crate::convert_makefile(makefile, &HashSet::new());
+	assert_eq!(result.targets["greet"].commands, vec!["echo héllo wörld ☕"]);
+}
+
+// ── Audit L17: echo-fallback target name sanitized (no shell injection) ──
+
+#[test]
+fn sanitize_echo_text_strips_shell_metacharacters() {
+	let malicious = "x\";rm -rf ~;echo \"";
+	let safe = crate::makefile::sanitize_echo_text(malicious);
+	for c in ['"', ';', '`', '$', '\\', '|', '&', '<', '>', '\n'] {
+		assert!(!safe.contains(c), "sanitized text must not contain {c:?}: {safe}");
+	}
+}
+
+#[test]
+fn sanitize_echo_text_keeps_normal_names() {
+	assert_eq!(crate::makefile::sanitize_echo_text("build:release"), "build:release");
+	assert_eq!(crate::makefile::sanitize_echo_text("a-b_c.d/e f"), "a-b_c.d/e f");
+}

@@ -302,8 +302,15 @@ fn collect_phony_targets(targets: &[MakeTarget]) -> std::collections::HashSet<St
 }
 
 /// Expand simple $(VAR) and ${VAR} references in a string.
-fn expand_variables(input: &str, vars: &HashMap<String, String>) -> String {
-	let mut result = String::with_capacity(input.len());
+pub(crate) fn expand_variables(input: &str, vars: &HashMap<String, String>) -> String {
+	// Accumulate BYTES, not chars: the previous `result.push(bytes[i] as char)`
+	// cast each byte of a multi-byte UTF-8 sequence to its own `char`, producing
+	// mojibake (`é` → `Ã©`). All the markers we scan for (`$`, `(`, `)`, `{`,
+	// `}`) are ASCII and can never appear inside a UTF-8 continuation byte, so
+	// byte-scanning stays correct while byte-appending preserves the original
+	// UTF-8. Every pushed run comes from a valid `&str`, so the buffer is always
+	// valid UTF-8.
+	let mut result: Vec<u8> = Vec::with_capacity(input.len());
 	let bytes = input.as_bytes();
 	let len = bytes.len();
 	let mut i = 0;
@@ -315,7 +322,7 @@ fn expand_variables(input: &str, vars: &HashMap<String, String>) -> String {
 			} else if bytes[i + 1] == b'{' {
 				(b'{', b'}')
 			} else {
-				result.push('$');
+				result.push(b'$');
 				i += 1;
 				continue;
 			};
@@ -326,33 +333,52 @@ fn expand_variables(input: &str, vars: &HashMap<String, String>) -> String {
 				// Only expand simple variable names (not function calls like $(shell ...) )
 				if !var_name.contains(' ') && !var_name.contains(',') {
 					if let Some(val) = vars.get(var_name) {
-						result.push_str(val);
+						result.extend_from_slice(val.as_bytes());
 					} else {
 						// Keep as-is if not in our variable map
-						result.push('$');
-						result.push(open as char);
-						result.push_str(var_name);
-						result.push(close as char);
+						result.push(b'$');
+						result.push(open);
+						result.extend_from_slice(var_name.as_bytes());
+						result.push(close);
 					}
 				} else {
 					// Keep function calls as-is
-					result.push('$');
-					result.push(open as char);
-					result.push_str(var_name);
-					result.push(close as char);
+					result.push(b'$');
+					result.push(open);
+					result.extend_from_slice(var_name.as_bytes());
+					result.push(close);
 				}
 				i = start + end + 1;
 			} else {
-				result.push('$');
+				result.push(b'$');
 				i += 1;
 			}
 		} else {
-			result.push(bytes[i] as char);
+			result.push(bytes[i]);
 			i += 1;
 		}
 	}
 
-	result
+	// Always valid UTF-8 by construction; lossy conversion never alters it and
+	// avoids any panic risk.
+	String::from_utf8_lossy(&result).into_owned()
+}
+
+/// Make a string safe to embed inside a double-quoted shell `echo`. Keeps
+/// alphanumerics and a small set of harmless punctuation; every other character
+/// (including `"`, `` ` ``, `$`, `\`, `;`, `|`, `&`, `<`, `>`, newlines) becomes
+/// `_`. Sanitizing rather than shell-escaping keeps this correct across every
+/// shell the converted Runfile might run under (sh/bash/zsh/fish/pwsh/cmd).
+pub(crate) fn sanitize_echo_text(s: &str) -> String {
+	s.chars()
+		.map(|c| {
+			if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | ':' | '.' | '/') {
+				c
+			} else {
+				'_'
+			}
+		})
+		.collect()
 }
 
 /// Check if a target should be skipped (special Make targets, internal names).
@@ -443,7 +469,12 @@ fn make_target_to_spec(target: &MakeTarget) -> CommandSpec {
 	if real_commands.is_empty() && !env_map.is_empty() {
 		real_commands.push("echo \"(no commands — env-only target)\"".to_string());
 	} else if real_commands.is_empty() {
-		real_commands.push(format!("echo \"Target: {}\"", target.name));
+		// Sanitize the name before embedding it in a shell `echo`: a crafted
+		// phony target name (e.g. `x";rm -rf ~;echo "`) would otherwise inject
+		// commands when the converted target is run. Keep only characters that
+		// are safe in any shell; replace the rest with `_`. This introduces no
+		// injection point the source Makefile didn't already have.
+		real_commands.push(format!("echo \"Target: {}\"", sanitize_echo_text(&target.name)));
 	}
 
 	let aliases = if target.aliases.is_empty() {

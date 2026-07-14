@@ -224,6 +224,23 @@ pub(crate) fn evaluate_function(
 			// string.
 			expect_arity(&call.name, &resolved, 2)?;
 			let count = parse_count(&call.name, "count", &resolved[1])?;
+			// Bound the allocation: an arg-supplied `count`
+			// (`repeat('x', ARG.n)` with `--n 99999999999`) would otherwise
+			// panic in `str::repeat` ("capacity overflow") or exhaust memory.
+			const MAX_REPEAT_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
+			if resolved[0]
+				.len()
+				.checked_mul(count)
+				.is_none_or(|n| n > MAX_REPEAT_BYTES)
+			{
+				return Err(SubstitutionError::InvalidNumber {
+					name: call.name.clone(),
+					message: format!(
+						"repeat would produce more than {MAX_REPEAT_BYTES} bytes ({} × {count})",
+						resolved[0].len()
+					),
+				});
+			}
 			Ok(resolved[0].repeat(count))
 		}
 		"regex_replace" => {
@@ -401,6 +418,14 @@ pub(crate) fn evaluate_function(
 			// are used verbatim. Errors out cleanly on missing files / bad
 			// UTF-8 — pair with `try(...)` to recover (`try(read_file(...))`).
 			expect_arity(&call.name, &resolved, 1)?;
+			// On the redacted logging pass, return a placeholder instead of the
+			// file contents — a `read_file` result is frequently a secret
+			// (`echo {{ read_file('.env') }}`) and log redaction otherwise only
+			// masks `ENV.*`, leaking file contents verbatim into `--logging`
+			// output. The real substitution pass still reads normally.
+			if redact_env {
+				return Ok(format!("<read_file: '{}'>", resolved[0]));
+			}
 			let resolved_path = resolve_substitution_path(args, &resolved[0]);
 			std::fs::read_to_string(&resolved_path)
 				.map_err(|e| SubstitutionError::ReadFileError(resolved[0].clone(), e.to_string()))
@@ -487,7 +512,7 @@ pub(crate) fn evaluate_function(
 			let segments = parse_json_path(&resolved[1])?;
 			let new_value: serde_json::Value =
 				serde_json::from_str(&resolved[2]).unwrap_or_else(|_| serde_json::Value::String(resolved[2].clone()));
-			json_set_value(&mut value, &segments, new_value);
+			json_set_value(&mut value, &segments, new_value)?;
 			Ok(serde_json::to_string(&value).unwrap_or_default())
 		}
 		"shell_quote" => {
@@ -533,6 +558,17 @@ pub(crate) fn evaluate_function(
 			// target run the command exactly once.
 			expect_arity(&call.name, &resolved, 1)?;
 			if args.dry_run {
+				return Ok(format!("<capture: '{}'>", resolved[0]));
+			}
+			// On the redacted logging pass, NEVER spawn the command. The real
+			// pass has already executed it; re-running here would (a) execute
+			// the shell command a second time and (b) — because ENV.* refs in
+			// the command are redacted to `***` on this pass — run a DIFFERENT
+			// command whose args are `***`, and a non-zero exit would abort the
+			// target after the real command already succeeded. Returning the
+			// placeholder also keeps captured output (potentially a secret) out
+			// of logs. Mirrors the `redact_env` guard on `write_file` / `define`.
+			if redact_env {
 				return Ok(format!("<capture: '{}'>", resolved[0]));
 			}
 			{
@@ -793,13 +829,44 @@ pub(crate) fn evaluate_function(
 				.get(1)
 				.map(|e| e.trim_start_matches('.'))
 				.filter(|e| !e.is_empty());
-			let mut name = format!("runfile-{}", generate_uuid());
-			if let Some(ext) = ext {
-				name.push('.');
-				name.push_str(ext);
+			// Create the file atomically and EXCLUSIVELY (O_CREAT|O_EXCL via
+			// `create_new`): in the world-writable OS temp dir this refuses to
+			// follow a pre-planted symlink or to clobber/truncate an existing
+			// file — the previous `std::fs::write` used O_CREAT|O_TRUNC, which
+			// does both. On the (astronomically unlikely) name collision, retry
+			// with a fresh uuid a bounded number of times.
+			use std::io::Write as _;
+			let dir = std::env::temp_dir();
+			let mut last_err: Option<std::io::Error> = None;
+			let mut created: Option<std::path::PathBuf> = None;
+			for _ in 0..8 {
+				let mut name = format!("runfile-{}", generate_uuid());
+				if let Some(ext) = ext {
+					name.push('.');
+					name.push_str(ext);
+				}
+				let path = dir.join(&name);
+				match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+					Ok(mut file) => {
+						file.write_all(content.as_bytes())
+							.map_err(|e| SubstitutionError::TempFileError(e.to_string()))?;
+						created = Some(path);
+						break;
+					}
+					Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+						last_err = Some(e);
+						continue;
+					}
+					Err(e) => return Err(SubstitutionError::TempFileError(e.to_string())),
+				}
 			}
-			let path = std::env::temp_dir().join(name);
-			std::fs::write(&path, content.as_bytes()).map_err(|e| SubstitutionError::TempFileError(e.to_string()))?;
+			let path = created.ok_or_else(|| {
+				SubstitutionError::TempFileError(
+					last_err
+						.map(|e| e.to_string())
+						.unwrap_or_else(|| "could not create a unique temp file".to_string()),
+				)
+			})?;
 			register_temp_artifact(path.clone(), false);
 			Ok(path.to_string_lossy().into_owned())
 		}
@@ -1286,10 +1353,20 @@ fn json_get_value<'a>(value: &'a serde_json::Value, path: &[JsonPathSegment]) ->
 /// index); non-numeric segments create objects. Existing nodes of the wrong
 /// type are replaced — `json_set` is destructive on container-type
 /// mismatches, mirroring `jq`'s assignment semantics.
-fn json_set_value(value: &mut serde_json::Value, path: &[JsonPathSegment], new_value: serde_json::Value) {
+/// Largest array index `json_set` will materialize. A numeric path segment
+/// creates/extends an array with `null`s up to the index, so an arg-supplied
+/// index (`json_set(j, ARG.idx, v)` with `--idx 999999999`) would otherwise
+/// allocate ~1e9 elements and exhaust memory.
+const MAX_JSON_SET_INDEX: usize = 1_000_000;
+
+fn json_set_value(
+	value: &mut serde_json::Value,
+	path: &[JsonPathSegment],
+	new_value: serde_json::Value,
+) -> Result<(), SubstitutionError> {
 	if path.is_empty() {
 		*value = new_value;
-		return;
+		return Ok(());
 	}
 	let (head, rest) = path.split_first().unwrap();
 	match head {
@@ -1299,9 +1376,15 @@ fn json_set_value(value: &mut serde_json::Value, path: &[JsonPathSegment], new_v
 			}
 			let map = value.as_object_mut().unwrap();
 			let entry = map.entry(k.clone()).or_insert(serde_json::Value::Null);
-			json_set_value(entry, rest, new_value);
+			json_set_value(entry, rest, new_value)
 		}
 		JsonPathSegment::Index(i) => {
+			if *i > MAX_JSON_SET_INDEX {
+				return Err(SubstitutionError::InvalidJsonPath(
+					i.to_string(),
+					format!("array index {i} exceeds the maximum of {MAX_JSON_SET_INDEX}"),
+				));
+			}
 			if !value.is_array() {
 				*value = serde_json::Value::Array(Vec::new());
 			}
@@ -1309,7 +1392,7 @@ fn json_set_value(value: &mut serde_json::Value, path: &[JsonPathSegment], new_v
 			while arr.len() <= *i {
 				arr.push(serde_json::Value::Null);
 			}
-			json_set_value(&mut arr[*i], rest, new_value);
+			json_set_value(&mut arr[*i], rest, new_value)
 		}
 	}
 }
@@ -1434,10 +1517,25 @@ fn quote_for_shell(value: &str, shell: &str) -> String {
 			format!("'{}'", escaped)
 		}
 		"cmd" => {
+			// NOTE: `cmd /C` performs `%VAR%` (and, under delayed expansion,
+			// `!VAR!`) substitution even inside double quotes, and there is no
+			// reliable way to escape `%` on the command line — so a value
+			// containing `%FOO%` may still be expanded by cmd. This is an
+			// inherent cmd.exe limitation, not something quoting can fully
+			// neutralize; only `"` is escaped here (to `""`).
 			let escaped = value.replace('"', "\"\"");
 			format!("\"{}\"", escaped)
 		}
-		// bash / zsh / sh / fish / unknown — POSIX-style single-quoting.
+		"fish" => {
+			// fish single quotes treat `\` and `'` as escape sequences (unlike
+			// POSIX, where both are literal inside `'...'`). Escape backslashes
+			// FIRST, then single quotes, so a value ending in `\` — which the
+			// POSIX branch would render as `'a\'` and fish would read as an
+			// unterminated string — is quoted correctly.
+			let escaped = value.replace('\\', "\\\\").replace('\'', "\\'");
+			format!("'{}'", escaped)
+		}
+		// bash / zsh / sh / unknown — POSIX-style single-quoting.
 		_ => {
 			let escaped = value.replace('\'', "'\\''");
 			format!("'{}'", escaped)

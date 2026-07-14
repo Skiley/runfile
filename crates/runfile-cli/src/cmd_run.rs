@@ -229,11 +229,20 @@ fn print_target(name: &str, spec: &CommandSpec, col_width: usize) {
 		let mut leaves: Vec<String> = Vec::new();
 		runfile_parser::walk_step_templates(&spec.commands, &mut |t| leaves.push(t.to_string()));
 		let full: String = leaves.join("; ");
-		if full.len() <= MAX_PREVIEW {
-			println!("  {name:<col_width$} {full}{alias_suffix}");
-		} else {
-			println!("  {name:<col_width$} {}...{alias_suffix}", &full[..MAX_PREVIEW]);
-		}
+		let preview = truncate_preview(&full, MAX_PREVIEW);
+		println!("  {name:<col_width$} {preview}{alias_suffix}");
+	}
+}
+
+/// Truncate a `:list` command preview to at most `max` CHARACTERS (not bytes),
+/// appending `...` when truncated. Byte slicing (`&full[..max]`) panics when a
+/// multi-byte UTF-8 character straddles the byte boundary.
+fn truncate_preview(full: &str, max: usize) -> String {
+	if full.chars().count() <= max {
+		full.to_string()
+	} else {
+		let preview: String = full.chars().take(max).collect();
+		format!("{preview}...")
 	}
 }
 
@@ -527,5 +536,40 @@ pub fn cmd_watch(
 		runfile_executor::cleanup_temp_artifacts();
 
 		eprintln!("{BOLD}{CYAN}[runfile]{RESET} {DIM}Watching for changes... (Ctrl+C to stop){RESET}");
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::truncate_preview;
+
+	#[test]
+	fn short_ascii_preview_is_unchanged() {
+		assert_eq!(truncate_preview("echo hi", 60), "echo hi");
+	}
+
+	#[test]
+	fn long_ascii_preview_is_truncated_with_ellipsis() {
+		let full = "a".repeat(100);
+		let out = truncate_preview(&full, 60);
+		assert_eq!(out.chars().count(), 63); // 60 + "..."
+		assert!(out.ends_with("..."));
+	}
+
+	#[test]
+	fn multibyte_preview_does_not_panic_and_truncates_by_char() {
+		// Audit L3: a multi-byte character straddling the byte boundary used to
+		// panic under `&full[..60]`. Each `é` is 2 bytes, so byte index 60 lands
+		// mid-character. Char-safe truncation must not panic.
+		let full = "é".repeat(100); // 200 bytes, 100 chars
+		let out = truncate_preview(&full, 60);
+		assert_eq!(out.chars().count(), 63);
+		assert!(out.ends_with("..."));
+	}
+
+	#[test]
+	fn exactly_max_chars_not_truncated() {
+		let full = "x".repeat(60);
+		assert_eq!(truncate_preview(&full, 60), full);
 	}
 }

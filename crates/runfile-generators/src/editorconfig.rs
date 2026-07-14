@@ -408,12 +408,44 @@ pub(crate) fn section_matches(pattern: &str, rel_path: &str) -> bool {
 		.any(|expanded| wildcard_match(expanded, target))
 }
 
+/// Maximum number of patterns a single section may expand into, and the maximum
+/// recursion depth of brace expansion. Both guard against a crafted
+/// `.editorconfig` section causing memory exhaustion (combinatorial blowup from
+/// `{a,b}{c,d}…`, i.e. 2ᴺ) or a stack overflow (deeply nested or long chains of
+/// groups). Real sections expand into a handful of patterns at depth ≤ a few.
+const MAX_BRACE_EXPANSIONS: usize = 1024;
+const MAX_BRACE_DEPTH: usize = 32;
+
 /// Expand `{a,b}` alternations and `{n..m}` numeric ranges into concrete patterns. Groups with
-/// no top-level comma that aren't numeric ranges (e.g. `{foo}`) are left literal.
+/// no top-level comma that aren't numeric ranges (e.g. `{foo}`) are left literal. Bounded by
+/// [`MAX_BRACE_EXPANSIONS`] / [`MAX_BRACE_DEPTH`]: on a pathological pattern, expansion stops
+/// early (leaving remaining groups un-expanded, which simply won't match our generated
+/// filenames) rather than exhausting memory or the stack.
 pub(crate) fn expand_braces(pattern: &str) -> Vec<String> {
+	let mut out = Vec::new();
+	expand_braces_into(pattern, 0, &mut out);
+	if out.is_empty() {
+		out.push(pattern.to_string());
+	}
+	out
+}
+
+fn expand_braces_into(pattern: &str, depth: usize, out: &mut Vec<String>) {
+	if out.len() >= MAX_BRACE_EXPANSIONS {
+		return;
+	}
+	if depth > MAX_BRACE_DEPTH {
+		// Too deeply nested — stop recursing. Emit the (still partly-braced)
+		// pattern literally; it won't match a real filename, which is the safe
+		// outcome for an adversarial section.
+		out.push(pattern.to_string());
+		return;
+	}
+
 	let chars: Vec<char> = pattern.chars().collect();
 	let Some((start, end)) = find_expandable_group(&chars) else {
-		return vec![pattern.to_string()];
+		out.push(pattern.to_string());
+		return;
 	};
 
 	let prefix: String = chars[..start].iter().collect();
@@ -427,16 +459,16 @@ pub(crate) fn expand_braces(pattern: &str) -> Vec<String> {
 		range
 	} else {
 		// Not actually expandable (shouldn't happen — find_expandable_group screens for this).
-		return vec![pattern.to_string()];
+		out.push(pattern.to_string());
+		return;
 	};
 
-	let mut out = Vec::new();
 	for item in items {
-		for expanded in expand_braces(&format!("{prefix}{item}{suffix}")) {
-			out.push(expanded);
+		if out.len() >= MAX_BRACE_EXPANSIONS {
+			return;
 		}
+		expand_braces_into(&format!("{prefix}{item}{suffix}"), depth + 1, out);
 	}
-	out
 }
 
 /// Find the first brace group that is genuinely expandable (has a top-level comma or is a numeric

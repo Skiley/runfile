@@ -703,6 +703,115 @@ fn nested_for_outer_parallel_inner_forced_sequential() {
 	assert_eq!(result.commands_run, 4);
 }
 
+// ── Audit M7: `when` partitioning inside a `parallel: true` target ──
+// A `when: failure` cleanup block must run when a parallel leaf fails, and a
+// `when: always` block must run regardless. Previously the failure/always
+// partitions were dropped at collection time (seeded with `Success`) AND
+// short-circuited by the batch error, so cleanups silently never ran. These
+// go through `run_target` because target-level `parallel: true` is dispatched
+// by the runner (not `execute_command`, which walks steps sequentially).
+
+/// Build a parse-able single-target Runfile from a JSON target body.
+fn parallel_when_runfile(target_body: &str) -> runfile_parser::Runfile {
+	let json = format!(
+		r#"{{"$schema":"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json","targets":{{"t":{target_body}}}}}"#
+	);
+	runfile_parser::parse_runfile(&json).unwrap()
+}
+
+/// True if the run failed — whether the runner surfaced an `Err` (failing shell
+/// leaf) or an `Ok` with a non-success status.
+fn run_failed<E>(result: &Result<crate::executor::ExecutionResult, E>) -> bool {
+	match result {
+		Err(_) => true,
+		Ok(r) => !r.final_status.success(),
+	}
+}
+
+#[test]
+fn parallel_when_failure_cleanup_runs_on_failure() {
+	use crate::runner::run_target;
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let fail_cmd = if shell.kind == ShellKind::Cmd {
+		"exit /b 1"
+	} else {
+		"exit 1"
+	};
+	let runfile = parallel_when_runfile(&format!(
+		r#"{{"parallel":true,"commands":["{fail_cmd}",{{"when":"failure","commands":["echo cleaned > failure.marker"]}}]}}"#
+	));
+	let args = RunArgs::default();
+	let result = run_target("t", &runfile, &shell, &args, dir.path());
+	assert!(
+		run_failed(&result),
+		"a failing parallel leaf should make the target fail"
+	);
+	assert!(
+		dir.path().join("failure.marker").exists(),
+		"when: failure cleanup must run after a parallel-batch failure"
+	);
+}
+
+#[test]
+fn parallel_when_failure_cleanup_skipped_on_success() {
+	use crate::runner::run_target;
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let runfile = parallel_when_runfile(
+		r#"{"parallel":true,"commands":["echo ok",{"when":"failure","commands":["echo cleaned > failure.marker"]}]}"#,
+	);
+	let args = RunArgs::default();
+	let result = run_target("t", &runfile, &shell, &args, dir.path()).unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		!dir.path().join("failure.marker").exists(),
+		"when: failure cleanup must NOT run when the parallel batch succeeded"
+	);
+}
+
+#[test]
+fn parallel_when_always_runs_even_on_failure() {
+	use crate::runner::run_target;
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let fail_cmd = if shell.kind == ShellKind::Cmd {
+		"exit /b 1"
+	} else {
+		"exit 1"
+	};
+	let runfile = parallel_when_runfile(&format!(
+		r#"{{"parallel":true,"commands":["{fail_cmd}",{{"when":"always","commands":["echo done > always.marker"]}}]}}"#
+	));
+	let args = RunArgs::default();
+	let result = run_target("t", &runfile, &shell, &args, dir.path());
+	assert!(
+		run_failed(&result),
+		"the failing leaf should still make the target fail"
+	);
+	assert!(
+		dir.path().join("always.marker").exists(),
+		"when: always block must run even when the parallel batch failed"
+	);
+}
+
+#[test]
+fn parallel_when_always_runs_on_success() {
+	use crate::runner::run_target;
+	let shell = get_test_shell();
+	let dir = TempDir::new().unwrap();
+	let runfile = parallel_when_runfile(
+		r#"{"parallel":true,"commands":["echo ok",{"when":"always","commands":["echo done > always.marker"]}]}"#,
+	);
+	let args = RunArgs::default();
+	let result = run_target("t", &runfile, &shell, &args, dir.path()).unwrap();
+	assert!(result.final_status.success());
+	assert!(
+		dir.path().join("always.marker").exists(),
+		"when: always block must run after a successful parallel batch"
+	);
+}
+
 #[test]
 fn missing_var_errors_at_runtime() {
 	// `{{ VAR.x }}` reference without a prior `define(x, ...)` (and not
