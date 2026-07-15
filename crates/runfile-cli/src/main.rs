@@ -183,6 +183,10 @@ enum GenerateAction {
 		/// carry their `namespace:` prefixes, just like `run :list`)
 		#[arg(long = "include-namespaces")]
 		include_namespaces: bool,
+		/// Also generate configurations for targets contributed by the global Runfile.json files
+		/// registered via `run :config global-files` (the same ones `run :list` merges in)
+		#[arg(long = "include-globals")]
+		include_globals: bool,
 	},
 	/// Generate VS Code tasks from Runfile targets
 	VscodeTasks {
@@ -196,6 +200,10 @@ enum GenerateAction {
 		/// their `namespace:` prefixes, just like `run :list`)
 		#[arg(long = "include-namespaces")]
 		include_namespaces: bool,
+		/// Also generate tasks for targets contributed by the global Runfile.json files registered
+		/// via `run :config global-files` (the same ones `run :list` merges in)
+		#[arg(long = "include-globals")]
+		include_globals: bool,
 	},
 	/// Generate Zed editor tasks from Runfile targets
 	ZedTasks {
@@ -209,6 +217,10 @@ enum GenerateAction {
 		/// their `namespace:` prefixes, just like `run :list`)
 		#[arg(long = "include-namespaces")]
 		include_namespaces: bool,
+		/// Also generate tasks for targets contributed by the global Runfile.json files registered
+		/// via `run :config global-files` (the same ones `run :list` merges in)
+		#[arg(long = "include-globals")]
+		include_globals: bool,
 	},
 }
 
@@ -491,23 +503,27 @@ fn main() {
 				file,
 				stdout,
 				include_namespaces,
-			} => cmd_utilities::cmd_generate_zed_tasks(file.as_deref(), stdout, include_namespaces),
+				include_globals,
+			} => cmd_utilities::cmd_generate_zed_tasks(file.as_deref(), stdout, include_namespaces, include_globals),
 			GenerateAction::JetbrainsRunConfigurations {
 				file,
 				output_dir,
 				stdout,
 				include_namespaces,
+				include_globals,
 			} => cmd_utilities::cmd_generate_jetbrains_run_configs(
 				file.as_deref(),
 				output_dir.as_deref(),
 				stdout,
 				include_namespaces,
+				include_globals,
 			),
 			GenerateAction::VscodeTasks {
 				file,
 				stdout,
 				include_namespaces,
-			} => cmd_utilities::cmd_generate_vscode_tasks(file.as_deref(), stdout, include_namespaces),
+				include_globals,
+			} => cmd_utilities::cmd_generate_vscode_tasks(file.as_deref(), stdout, include_namespaces, include_globals),
 		},
 		Some(Commands::Convert { action }) => match action {
 			ConvertAction::Makefile { path } => cmd_utilities::cmd_convert_makefile(path),

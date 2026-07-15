@@ -127,35 +127,95 @@ pub fn resolve_and_merge(file: Option<&std::path::Path>) -> MergeResult {
 
 /// Build the Runfile the `:generate` commands should operate on.
 ///
-/// Always parses the local Runfile (respecting `-f`/`--file`, path aliases, and
-/// `RUNFILE_TARGET`). When `include_namespaces` is false, only that file's own
-/// targets are used — the historical single-file behavior. When true, the file's
-/// `includes` are resolved and merged so included targets (namespaced ones carry
-/// the same `namespace:` prefixes `run :list` shows) are added to the target set.
+/// Parses the local Runfile (respecting `-f`/`--file`, path aliases, and
+/// `RUNFILE_TARGET`). The two `include_*` flags are independent axes over which
+/// targets reach the generators:
 ///
-/// Global user-level files are deliberately never pulled in — generated editor
-/// configs stay scoped to the project's own Runfile and its includes. Conflicting
-/// targets (defined in multiple files) are dropped by the merge, exactly as they
-/// are for `run :list`, so they never reach the generators.
-pub fn runfile_for_generate(file: Option<&std::path::Path>, include_namespaces: bool) -> Runfile {
-	let runfile_path = resolve_runfile_path(file);
-	let runfile = match parse_runfile_from_path(&runfile_path) {
-		Ok(r) => r,
+/// - `include_namespaces`: resolve and merge the file's own `includes` so
+///   included targets (namespaced ones carry the same `namespace:` prefixes
+///   `run :list` shows) are added to the set.
+/// - `include_globals`: merge the global Runfile.json files registered via
+///   `run :config global-files` — the same ones `run :list` folds in — so
+///   user-level targets become generatable too. With this on, an *auto-discovered*
+///   local Runfile that isn't found is tolerated (the globals still generate),
+///   mirroring how `run :list` works with no local Runfile; an explicit
+///   `-f`/`RUNFILE_TARGET` target must still resolve.
+///
+/// With neither flag set we return the local file's own targets verbatim (the
+/// historical single-file behavior). Conflicting targets (defined in multiple
+/// files) are dropped by the merge, exactly as they are for `run :list`, so they
+/// never reach the generators.
+pub fn runfile_for_generate(
+	file: Option<&std::path::Path>,
+	include_namespaces: bool,
+	include_globals: bool,
+) -> Runfile {
+	// Fast path: no merging requested — hand back the local file's own targets
+	// verbatim (a discoverable local Runfile is required, as it always was).
+	if !include_namespaces && !include_globals {
+		let path = resolve_runfile_path(file);
+		return parse_runfile_or_exit(&path);
+	}
+
+	let global_files = if include_globals {
+		Settings::load().unwrap_or_default().global_files
+	} else {
+		Vec::new()
+	};
+
+	// Resolve the local Runfile. An explicit `-f`/`RUNFILE_TARGET` must resolve
+	// (as everywhere else). An auto-discovered Runfile that isn't found is only a
+	// hard error when there are no global files to fall back on — otherwise we
+	// generate from the globals alone.
+	let local: Option<(Runfile, PathBuf)> = if effective_file(file).is_some() {
+		let path = resolve_runfile_path(file);
+		Some((parse_runfile_or_exit(&path), path))
+	} else {
+		match discover_runfile_cwd() {
+			Ok(p) => {
+				let abs = canonicalize_clean(&p);
+				Some((parse_runfile_or_exit(&abs), abs))
+			}
+			Err(e) => {
+				if global_files.is_empty() {
+					eprintln!("Error: {e}");
+					process::exit(1);
+				}
+				None
+			}
+		}
+	};
+
+	let cwd = std::env::current_dir().unwrap_or_default();
+	let mut result = match merge_runfiles(local, &global_files, &cwd) {
+		Ok(result) => result,
 		Err(e) => {
-			eprintln!("Error parsing {}: {e}", runfile_path.display());
+			eprintln!("Error: {e}");
 			process::exit(1);
 		}
 	};
 
+	// `merge_runfiles` always resolves the local file's `includes`. When the
+	// caller wanted globals but *not* namespaces, drop the included targets so
+	// the two flags stay independent (local + global only).
 	if !include_namespaces {
-		return runfile;
+		let sources = &result.target_sources;
+		result
+			.runfile
+			.targets
+			.retain(|name, _| sources.get(name).is_none_or(|(_, kind)| *kind != SourceKind::Included));
 	}
 
-	let cwd = std::env::current_dir().unwrap_or_default();
-	match merge_runfiles(Some((runfile, runfile_path)), &[], &cwd) {
-		Ok(result) => result.runfile,
+	result.runfile
+}
+
+/// Parse a Runfile at `path`, printing a parse error and exiting on failure.
+/// Shared by [`runfile_for_generate`]'s local-resolution branches.
+fn parse_runfile_or_exit(path: &Path) -> Runfile {
+	match parse_runfile_from_path(path) {
+		Ok(r) => r,
 		Err(e) => {
-			eprintln!("Error: {e}");
+			eprintln!("Error parsing {}: {e}", path.display());
 			process::exit(1);
 		}
 	}

@@ -635,11 +635,14 @@ generated config (not merged with any existing file on disk) and nothing is crea
 For `jetbrains-run-configurations`, which produces one file per target, each block is delimited by a
 `<!-- .run/<file> -->` comment when more than one is emitted.
 
-By default only the local Runfile's own targets are generated. Pass `--include-namespaces` to also
-generate entries for targets pulled in via `includes` — namespaced targets carry their `namespace:`
-prefixes, exactly as `run :list` shows them (e.g. `run api:build`). The flag composes with `--stdout`
-and with the on-disk writers. Global user-level Runfiles are never included; generated editor configs
-stay scoped to the project.
+By default only the local Runfile's own targets are generated. Two independent flags widen the set,
+and both compose with `--stdout` and the on-disk writers:
+
+- `--include-namespaces` also generates entries for targets pulled in via `includes` — namespaced
+  targets carry their `namespace:` prefixes, exactly as `run :list` shows them (e.g. `run api:build`).
+- `--include-globals` also generates entries for the global user-level Runfiles registered with
+  `run :config global-files` — the same ones `run :list` folds in. Handy when an editor integration
+  should offer your machine-wide targets (e.g. `run c`, `run backup-git`) alongside a project's own.
 
 Skip a target from the generated configs by setting `metadata.excludeFromGenerateCommand: true`. The
 `metadata` block on `globals` and on each target is **fully open** — any property of any JSON type

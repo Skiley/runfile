@@ -22,6 +22,11 @@ pub struct VsCodeTask {
 	pub command: String,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub args: Vec<String>,
+	/// Human-readable description shown in the Run Task quick-pick (and by clients
+	/// that surface tasks, like the Runfile sidebar). Sourced from the target's
+	/// `description`; omitted entirely when the target has none.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub detail: Option<String>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub presentation: Option<VsCodeTaskPresentation>,
 	/// Catch-all for other fields we don't generate but want to preserve.
@@ -103,6 +108,7 @@ pub fn merge_vscode_tasks(existing: &mut VsCodeTasksFile, generated: Vec<VsCodeT
 			entry.task_type = task.task_type;
 			entry.command = task.command;
 			entry.args = task.args;
+			entry.detail = task.detail;
 			entry.presentation = task.presentation;
 			updated.push(task.label);
 		} else {
@@ -175,6 +181,7 @@ fn build_vscode_task(label: &str, target_name: &str, spec: &CommandSpec) -> VsCo
 		task_type: "shell".to_string(),
 		command: "run".to_string(),
 		args,
+		detail: spec.description.clone(),
 		presentation: Some(VsCodeTaskPresentation {
 			reveal: "always".to_string(),
 			panel: "shared".to_string(),

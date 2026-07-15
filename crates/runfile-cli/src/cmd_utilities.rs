@@ -207,12 +207,17 @@ fn write_generated_to_stdout(bytes: &[u8]) {
 	}
 }
 
-pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>, stdout: bool, include_namespaces: bool) {
+pub fn cmd_generate_vscode_tasks(
+	file: Option<&std::path::Path>,
+	stdout: bool,
+	include_namespaces: bool,
+	include_globals: bool,
+) {
 	use runfile_generators::{
 		generate_vscode_tasks, merge_vscode_tasks, render_vscode_tasks, EditorConfigProps, VsCodeTasksFile,
 	};
 
-	let runfile = runfile_for_generate(file, include_namespaces);
+	let runfile = runfile_for_generate(file, include_namespaces, include_globals);
 
 	let tasks_path = PathBuf::from(".vscode/tasks.json");
 
@@ -303,10 +308,15 @@ pub fn cmd_generate_vscode_tasks(file: Option<&std::path::Path>, stdout: bool, i
 	}
 }
 
-pub fn cmd_generate_zed_tasks(file: Option<&std::path::Path>, stdout: bool, include_namespaces: bool) {
+pub fn cmd_generate_zed_tasks(
+	file: Option<&std::path::Path>,
+	stdout: bool,
+	include_namespaces: bool,
+	include_globals: bool,
+) {
 	use runfile_generators::{generate_zed_tasks, merge_zed_tasks, render_zed_tasks, EditorConfigProps, ZedTask};
 
-	let runfile = runfile_for_generate(file, include_namespaces);
+	let runfile = runfile_for_generate(file, include_namespaces, include_globals);
 
 	let tasks_path = PathBuf::from(".zed/tasks.json");
 
@@ -393,6 +403,7 @@ pub fn cmd_generate_jetbrains_run_configs(
 	output_dir: Option<&std::path::Path>,
 	stdout: bool,
 	include_namespaces: bool,
+	include_globals: bool,
 ) {
 	use runfile_generators::{
 		check_existing_jetbrains_config, generate_jetbrains_configs, is_jetbrains_config_ours, render_jetbrains_config,
@@ -400,7 +411,7 @@ pub fn cmd_generate_jetbrains_run_configs(
 	};
 	use std::collections::HashSet;
 
-	let runfile = runfile_for_generate(file, include_namespaces);
+	let runfile = runfile_for_generate(file, include_namespaces, include_globals);
 
 	let run_dir = output_dir.map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".run"));
 

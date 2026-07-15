@@ -300,6 +300,83 @@ fn generate_jetbrains_include_namespaces_sanitizes_colon_in_filename() {
 	);
 }
 
+// ── :generate --include-globals pulls in registered global-file targets ──
+
+#[test]
+fn generate_vscode_include_globals_adds_global_targets_with_detail() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	write(&root.join("Runfile.json"), RUNFILE_ONE_TARGET);
+
+	// A global Runfile registered via `run :config global-files add`. Its target
+	// carries a description so we can assert it surfaces as the task `detail`.
+	let global = root.join("global/Runfile.json");
+	write(
+		&global,
+		r#"{ "$schema": "x", "targets": { "deploy": { "description": "Ship it", "commands": ["echo deploy"] } } }"#,
+	);
+	let add = run_in(root, &[":config", "global-files", "add", global.to_str().unwrap()]);
+	assert!(add.status.success(), "stderr: {}", String::from_utf8_lossy(&add.stderr));
+
+	// Without the flag: only the local target — the global one stays out.
+	let plain = stdout_of(&run_in(root, &[":generate", "vscode-tasks", "--stdout"]));
+	assert!(plain.contains("\"run build\""), "expected local build:\n{plain}");
+	assert!(
+		!plain.contains("run deploy"),
+		"global target must be absent without the flag:\n{plain}"
+	);
+
+	// With the flag: local + global targets, and the global's description as `detail`.
+	let out = run_in(root, &[":generate", "vscode-tasks", "--stdout", "--include-globals"]);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+	let stdout = stdout_of(&out);
+	assert!(
+		stdout.contains("\"label\": \"run build\""),
+		"expected local build:\n{stdout}"
+	);
+	assert!(
+		stdout.contains("\"label\": \"run deploy\""),
+		"expected global deploy:\n{stdout}"
+	);
+	assert!(
+		stdout.contains("\"detail\": \"Ship it\""),
+		"expected global description surfaced as detail:\n{stdout}"
+	);
+	assert!(!root.join(".vscode").exists(), "--stdout must not create .vscode/");
+}
+
+#[test]
+fn generate_vscode_include_globals_works_without_a_local_runfile() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	// No Runfile.json at `root` (or above it) — only a registered global file,
+	// tucked in a subdir so auto-discovery from `root` can't find it as "local".
+	let global = root.join("global/Runfile.json");
+	write(
+		&global,
+		r#"{ "$schema": "x", "targets": { "deploy": { "commands": ["echo deploy"] } } }"#,
+	);
+	let add = run_in(root, &[":config", "global-files", "add", global.to_str().unwrap()]);
+	assert!(add.status.success(), "stderr: {}", String::from_utf8_lossy(&add.stderr));
+
+	// Without the flag and no local Runfile: the historical hard error stands.
+	let bare = run_in(root, &[":generate", "vscode-tasks", "--stdout"]);
+	assert!(
+		!bare.status.success(),
+		"expected failure with no local Runfile and no flag"
+	);
+
+	// With --include-globals: the global target generates even though there is no
+	// local Runfile to anchor to.
+	let out = run_in(root, &[":generate", "vscode-tasks", "--stdout", "--include-globals"]);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+	let stdout = stdout_of(&out);
+	assert!(
+		stdout.contains("\"label\": \"run deploy\""),
+		"expected global deploy with no local Runfile:\n{stdout}"
+	);
+}
+
 // ── :generate writes files, honoring .editorconfig ───────────────────────
 
 #[test]

@@ -8,6 +8,7 @@ fn vscode_task(label: &str, command: &str, args: Vec<&str>) -> VsCodeTask {
 		task_type: "shell".into(),
 		command: command.into(),
 		args: args.into_iter().map(String::from).collect(),
+		detail: None,
 		presentation: None,
 		extra: serde_json::Map::new(),
 	}
