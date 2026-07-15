@@ -197,13 +197,15 @@ pub fn runfile_for_generate(
 
 	// `merge_runfiles` always resolves the local file's `includes`. When the
 	// caller wanted globals but *not* namespaces, drop the included targets so
-	// the two flags stay independent (local + global only).
+	// the two flags stay independent (local + global only), and drop the
+	// namespace list with them since no namespaced targets remain.
 	if !include_namespaces {
 		let sources = &result.target_sources;
 		result
 			.runfile
 			.targets
 			.retain(|name, _| sources.get(name).is_none_or(|(_, kind)| *kind != SourceKind::Included));
+		result.runfile.namespaces.clear();
 	}
 
 	result.runfile

@@ -414,6 +414,7 @@ fn sample_vscode_file() -> VsCodeTasksFile {
 	let runfile = make_runfile(vec![("build", vec!["cargo build"])]);
 	VsCodeTasksFile {
 		version: "2.0.0".to_string(),
+		namespaces: Vec::new(),
 		tasks: generate_vscode_tasks(&runfile),
 		extra: serde_json::Map::new(),
 	}

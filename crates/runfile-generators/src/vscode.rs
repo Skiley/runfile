@@ -7,6 +7,12 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VsCodeTasksFile {
 	pub version: String,
+	/// The include-namespaces present in the generated set (the same list `run :list`
+	/// groups by), so consumers like the Runfile VS Code extension can bucket tasks by
+	/// *real* namespace instead of guessing from colons in target names. Emitted only in
+	/// `--stdout` mode; omitted when empty so on-disk `tasks.json` files stay clean.
+	#[serde(default, rename = "runfileNamespaces", skip_serializing_if = "Vec::is_empty")]
+	pub namespaces: Vec<String>,
 	pub tasks: Vec<VsCodeTask>,
 	/// Catch-all for other top-level fields we don't generate but want to preserve.
 	#[serde(flatten)]

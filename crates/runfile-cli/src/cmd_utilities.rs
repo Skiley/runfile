@@ -231,6 +231,7 @@ pub fn cmd_generate_vscode_tasks(
 		// formatted as it would be written. Nothing is read from or written to disk.
 		let generated = VsCodeTasksFile {
 			version: "2.0.0".to_string(),
+			namespaces: runfile.namespaces.clone(),
 			tasks: generate_vscode_tasks(&runfile),
 			extra: serde_json::Map::new(),
 		};
@@ -254,6 +255,7 @@ pub fn cmd_generate_vscode_tasks(
 	} else {
 		VsCodeTasksFile {
 			version: "2.0.0".to_string(),
+			namespaces: Vec::new(),
 			tasks: Vec::new(),
 			extra: serde_json::Map::new(),
 		}

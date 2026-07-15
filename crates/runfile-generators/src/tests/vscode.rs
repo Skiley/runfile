@@ -17,6 +17,7 @@ fn vscode_task(label: &str, command: &str, args: Vec<&str>) -> VsCodeTask {
 fn empty_vscode_tasks_file(tasks: Vec<VsCodeTask>) -> VsCodeTasksFile {
 	VsCodeTasksFile {
 		version: "2.0.0".into(),
+		namespaces: Vec::new(),
 		tasks,
 		extra: serde_json::Map::new(),
 	}

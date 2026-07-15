@@ -305,6 +305,59 @@ fn generate_jetbrains_include_namespaces_sanitizes_colon_in_filename() {
 	);
 }
 
+// ── :generate vscode emits real namespaces (not colon-named locals) ──────
+
+#[test]
+fn generate_vscode_stdout_emits_real_namespaces_only() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	// A local target whose *name* contains a colon (like `all:package`) is NOT a
+	// namespace; only the `api` include is. `runfileNamespaces` must list `api` alone.
+	write(
+		&root.join("Runfile.json"),
+		r#"{
+			"$schema": "x",
+			"includes": [ { "path": "api/Runfile.json", "namespace": "api" } ],
+			"targets": { "all:package": { "commands": ["echo all"] } }
+		}"#,
+	);
+	write(
+		&root.join("api/Runfile.json"),
+		r#"{ "$schema": "x", "targets": { "deploy": { "commands": ["echo deploy"] } } }"#,
+	);
+
+	let out = run_in(root, &[":generate", "vscode-tasks", "--stdout", "--include-namespaces"]);
+	assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+	let doc: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("valid JSON");
+
+	let namespaces: Vec<&str> = doc["runfileNamespaces"]
+		.as_array()
+		.expect("runfileNamespaces array")
+		.iter()
+		.filter_map(|v| v.as_str())
+		.collect();
+	assert_eq!(namespaces, ["api"], "only the real include namespace should be listed");
+
+	// Both targets are generated; only `api:deploy` is namespaced.
+	let stdout = stdout_of(&out);
+	assert!(
+		stdout.contains("\"label\": \"run api:deploy\""),
+		"expected api:deploy:\n{stdout}"
+	);
+	assert!(
+		stdout.contains("\"label\": \"run all:package\""),
+		"expected local all:package:\n{stdout}"
+	);
+
+	// Without the flag, the key is omitted entirely (no namespaced targets emitted).
+	let bare = stdout_of(&run_in(root, &[":generate", "vscode-tasks", "--stdout"]));
+	let bare_doc: serde_json::Value = serde_json::from_str(&bare).expect("valid JSON");
+	assert!(
+		bare_doc.get("runfileNamespaces").is_none(),
+		"runfileNamespaces must be absent without --include-namespaces:\n{bare}"
+	);
+}
+
 // ── :generate --include-globals pulls in registered global-file targets ──
 
 #[test]
