@@ -20,6 +20,11 @@ fn run_in(dir: &Path, args: &[&str]) -> Output {
 		.env("HOME", &home)
 		.env("XDG_CONFIG_HOME", home.join(".config"))
 		.env("APPDATA", home.join("AppData"))
+		// `dirs::config_dir()` ignores `%APPDATA%` on Windows (it reads the Known
+		// Folder API), so the vars above don't isolate settings there. This one
+		// does, cross-platform — without it, real machine-registered global files
+		// leak into `--include-globals` output on Windows CI.
+		.env("RUNFILE_CONFIG_DIR", home.join("runfile"))
 		.env_remove("RUNFILE_TARGET")
 		.env_remove("RUNFILE_ENV_FILE_TARGET")
 		.output()
