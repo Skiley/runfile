@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 // Re-export the core env types and functions from runfile-env
-pub use runfile_env::parse_env_file;
 pub use runfile_env::EnvError as EnvFileError;
+pub use runfile_env::parse_env_file;
 pub use runfile_env::{LazyPrivateKeys, PrivateKeyProvider};
 
 /// Convert an `Option<HashMap<String, EnvValue>>` to `Option<HashMap<String, String>>`.

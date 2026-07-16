@@ -2,7 +2,8 @@
 	"$schema": "./schemas/v0.schema.json",
 	"globals": {
 		"env": {
-			"CARGO_TARGET_DIR": "target-{{ RUN.os }}"
+			"CARGO_TARGET_DIR": "target-{{ RUN.os }}",
+			"CARGO_TERM_COLOR": "always"
 		},
 		"logging": true
 	},
@@ -13,29 +14,27 @@
 		}
 	],
 	"targets": {
+		"audit": {
+			"commands": "cargo audit",
+			"description": "Fail on RustSec advisories in the dependency tree"
+		},
 		"build": {
-			"description": "Build all crates in debug mode",
-			"commands": [
-				"cargo build {{ ARGS }}",
-				{
-					"if": "{{ RUN.os == 'windows' }}",
-					"then": "@wsl:build"
-				},
-				"@install"
-			]
+			"commands": "cargo build --locked {{ ARGS }}",
+			"description": "Debug build of the whole workspace"
 		},
 		"build:release": {
-			"description": "Build all crates in release mode",
+			"commands": "cargo build --locked --release {{ ARGS }}",
+			"description": "Optimized release build of the whole workspace"
+		},
+		"check": {
 			"commands": [
-				"cargo build --release {{ ARGS }}",
-				{
-					"if": "{{ RUN.os == 'windows' }}",
-					"then": "@wsl:build:release"
-				}
-			]
+				"cargo fmt --all -- --check",
+				"cargo clippy --all-targets --all-features --locked -- -D warnings",
+				"cargo check --all-targets --all-features --locked"
+			],
+			"description": "Non-mutating gate: format check + Clippy (deny warnings) + type/borrow check"
 		},
 		"clean": {
-			"description": "Remove build artifacts",
 			"commands": [
 				{
 					"for": "dir",
@@ -47,10 +46,14 @@
 					],
 					"do": "cargo clean --target-dir target{{ VAR.dir }}"
 				}
-			]
+			],
+			"description": "Remove build artifacts"
+		},
+		"cli": {
+			"commands": "cargo run --locked --quiet -p runfile-cli -- {{ ARGS }}",
+			"description": "Run the working-tree run CLI, forwarding arguments"
 		},
 		"install": {
-			"description": "Copies the built binary to .local/bin as \"rund\"",
 			"commands": [
 				{
 					"if": "{{ RUN.os == 'windows' }}",
@@ -65,40 +68,36 @@
 				},
 				"cp {{ ENV.CARGO_TARGET_DIR }}/debug/{{ VAR.executable }} ~/.local/bin/{{ VAR.installed }}"
 			],
+			"description": "Copies the built binary to .local/bin as \"rund\"",
 			"detach": true,
 			"forceShell": "sh",
 			"parallel": true
 		},
 		"lint": {
-			"description": "Completely lints (type-checks, formats, runs Clippy) the project",
 			"commands": [
-				"cargo check",
+				"cargo check --all-targets --all-features --locked",
 				"cargo fmt --all",
-				"cargo clippy --all-targets --all-features -- -D warnings",
-				{
-					"if": "{{ RUN.os == 'windows' }}",
-					"then": "@wsl:lint"
-				}
-			]
+				"cargo clippy --all-targets --all-features --locked -- -D warnings"
+			],
+			"description": "Mutating: type-check, format (write), and Clippy"
 		},
 		"miri": {
-			"description": "Run Miri (UB checker) on the pure-logic crates (no FFI / no process spawning)",
 			"commands": [
 				"cargo +nightly miri test -p runfile-crypto",
-				"cargo +nightly miri test -p runfile-parser",
 				"cargo +nightly miri test -p runfile-env",
+				"cargo +nightly miri test -p runfile-parser",
 				"cargo +nightly miri test -p runfile-shell"
-			]
+			],
+			"description": "Run Miri (UB checker) on the pure-logic crates (no FFI / no process spawning)"
 		},
 		"miri:setup": {
-			"description": "One-time: install the nightly Miri component and build its sysroot",
 			"commands": [
 				"rustup toolchain install nightly --component miri",
 				"cargo +nightly miri setup"
-			]
+			],
+			"description": "One-time: install the nightly Miri component and build its sysroot"
 		},
 		"release": {
-			"description": "Bumps the workspace version (major/minor/patch) in Cargo.toml, refreshes Cargo.lock, tags the commit, then pushes everything so CI runs the release",
 			"commands": [
 				"{{ define(part, one_of(ARGS, 'major', 'minor', 'patch')) }}",
 				"{{ define(cargo, read_file('Cargo.toml')) }}",
@@ -122,17 +121,16 @@
 				"git push",
 				"git push --tags"
 			],
+			"description": "Bumps the workspace version (major/minor/patch) in Cargo.toml, refreshes Cargo.lock, tags the commit, then pushes everything so CI runs the release",
 			"forceShell": "sh"
 		},
+		"setup": {
+			"commands": "git config core.hooksPath .githooks",
+			"description": "One-time setup: activate the committed git hooks"
+		},
 		"test": {
-			"description": "Run all workspace tests",
-			"commands": [
-				"cargo test {{ ARGS }}",
-				{
-					"if": "{{ RUN.os == 'windows' }}",
-					"then": "@wsl:test"
-				}
-			]
+			"commands": "cargo test --workspace --all-features --locked {{ ARGS }}",
+			"description": "Run all workspace tests"
 		}
 	}
 }

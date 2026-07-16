@@ -1,16 +1,16 @@
-use crate::args::{validate_args, RunArgs, SubstitutionError};
-use crate::control_flow::{collect_detach_leaves, DetachFlattenError};
+use crate::args::{RunArgs, SubstitutionError, validate_args};
+use crate::control_flow::{DetachFlattenError, collect_detach_leaves};
 use crate::env::{EnvFileError, PrivateKeyProvider};
 use crate::executor::{
-	execute_command_with_counter, execute_detached, execute_parallel_with_counter, execute_same_shell_with_counter,
-	join_shell_commands, DependencyResolver, ExecuteError, ExecutionResult,
+	DependencyResolver, ExecuteError, ExecutionResult, execute_command_with_counter, execute_detached,
+	execute_parallel_with_counter, execute_same_shell_with_counter, join_shell_commands,
 };
-use crate::logging::{log_command, log_target_timing, StepCounter};
+use crate::logging::{StepCounter, log_command, log_target_timing};
 use runfile_parser::{
-	walk_spec_aux_templates, CommandStep, ForInValue, ForStep, IfStep, MatchStep, Runfile, WhenStep,
-	WORKING_DIRECTORY_DEFAULT,
+	CommandStep, ForInValue, ForStep, IfStep, MatchStep, Runfile, WORKING_DIRECTORY_DEFAULT, WhenStep,
+	walk_spec_aux_templates,
 };
-use runfile_shell::{resolve_shell, ResolvedShell};
+use runfile_shell::{ResolvedShell, resolve_shell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -494,19 +494,20 @@ fn run_target_inner_body(
 	}
 
 	// Confirmation prompt (skip in CI or with --yes)
-	if let Some(prompt) = &spec.confirm {
-		if !root.yes && !is_ci_environment() {
-			eprint!("\x1b[1m\x1b[36m[runfile]\x1b[0m {} \x1b[2m(y/N)\x1b[0m ", prompt);
-			let _ = std::io::Write::flush(&mut std::io::stderr());
-			let mut input = String::new();
-			if std::io::stdin().read_line(&mut input).is_err() || !input.trim().eq_ignore_ascii_case("y") {
-				eprintln!("\x1b[1m\x1b[36m[runfile]\x1b[0m Aborted.");
-				return Ok(ExecutionResult {
-					commands_run: 0,
-					failures: 0,
-					final_status: dummy_success_status(),
-				});
-			}
+	if let Some(prompt) = &spec.confirm
+		&& !root.yes
+		&& !is_ci_environment()
+	{
+		eprint!("\x1b[1m\x1b[36m[runfile]\x1b[0m {} \x1b[2m(y/N)\x1b[0m ", prompt);
+		let _ = std::io::Write::flush(&mut std::io::stderr());
+		let mut input = String::new();
+		if std::io::stdin().read_line(&mut input).is_err() || !input.trim().eq_ignore_ascii_case("y") {
+			eprintln!("\x1b[1m\x1b[36m[runfile]\x1b[0m Aborted.");
+			return Ok(ExecutionResult {
+				commands_run: 0,
+				failures: 0,
+				final_status: dummy_success_status(),
+			});
 		}
 	}
 

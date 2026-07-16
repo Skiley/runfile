@@ -703,6 +703,18 @@ The full reference — every property, every flag, every subcommand — lives in
 
 ---
 
+## Development
+
+```bash
+run setup          # one-time per clone: activates the committed git hooks (.githooks/)
+run build          # debug build
+run check          # non-mutating gate: fmt --check + clippy (deny warnings) + cargo check
+run lint           # auto-format + clippy
+run test           # full workspace test suite
+```
+
+---
+
 ## License
 
 MIT

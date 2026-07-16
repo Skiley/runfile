@@ -236,11 +236,13 @@ bbb ccc:
 	let result = crate::convert_makefile(makefile, &HashSet::new());
 	assert_eq!(result.targets["aaa"].commands, vec!["echo aaa"]);
 	assert_eq!(result.targets["bbb"].commands, vec!["echo bbb"]);
-	assert!(result.targets["bbb"]
-		.aliases
-		.as_ref()
-		.unwrap()
-		.contains(&"ccc".to_string()));
+	assert!(
+		result.targets["bbb"]
+			.aliases
+			.as_ref()
+			.unwrap()
+			.contains(&"ccc".to_string())
+	);
 }
 
 #[test]

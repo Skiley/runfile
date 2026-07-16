@@ -4,8 +4,8 @@ use runfile_settings::Settings;
 use std::path::PathBuf;
 use std::process;
 
-use crate::runfile_helpers::runfile_target_env;
 use crate::Cli;
+use crate::runfile_helpers::runfile_target_env;
 
 /// Print target names (one per line) for shell completion scripts.
 /// Never writes to stderr or exits with non-zero — errors are silently ignored.

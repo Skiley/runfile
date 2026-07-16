@@ -32,9 +32,11 @@ fn jetbrains_colon_in_target_name_becomes_capitalized_words() {
 	assert_eq!(configs[0].file_name, "Runfile_build_infrastructure.run.xml");
 	assert!(configs[0].xml.contains("name=\"Build Infrastructure\""));
 	// SCRIPT_TEXT keeps the original target name so `run` resolves it correctly.
-	assert!(configs[0]
-		.xml
-		.contains("value=\"run --stdin-args build:infrastructure\""));
+	assert!(
+		configs[0]
+			.xml
+			.contains("value=\"run --stdin-args build:infrastructure\"")
+	);
 }
 
 #[test]

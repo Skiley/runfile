@@ -1,6 +1,6 @@
-use crate::install::{install_for_agent, mcp_config_snippet, InstallResult};
+use crate::install::{InstallResult, install_for_agent, mcp_config_snippet};
 use crate::tools::{build_tool_defs, inspect_json};
-use runfile_parser::{CommandSpec, EnvValue, Runfile, RUNFILE_NAME};
+use runfile_parser::{CommandSpec, EnvValue, RUNFILE_NAME, Runfile};
 use std::collections::HashMap;
 
 fn make_runfile(targets: Vec<(&str, CommandSpec)>) -> Runfile {

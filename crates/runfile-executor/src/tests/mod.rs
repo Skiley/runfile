@@ -1,8 +1,8 @@
-use crate::args::{check_env_case_duplicates, scan_args_usage, validate_args, RunArgs, RunContext, SubstitutionError};
+use crate::args::{RunArgs, RunContext, SubstitutionError, check_env_case_duplicates, scan_args_usage, validate_args};
 use crate::env::{build_env, load_env_files, parse_env_file};
 use crate::executor::{execute_command, execute_parallel};
 use runfile_parser::{CommandSpec, CommandStep, EnvValue};
-use runfile_shell::{detect_default_shell, ResolvedShell, ShellKind};
+use runfile_shell::{ResolvedShell, ShellKind, detect_default_shell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -1097,7 +1097,7 @@ fn run_target_with_dependency() {
 
 #[test]
 fn run_target_cycle_detection() {
-	use crate::runner::{run_target, RunError};
+	use crate::runner::{RunError, run_target};
 	use runfile_parser::parse_runfile;
 
 	let shell = get_test_shell();
@@ -1135,10 +1135,14 @@ mod env_file_tests;
 mod escape_parallel_tests;
 mod extract_tests;
 mod flags_run_tests;
+mod force_kill;
 mod functions;
+mod logging;
+mod parallel_output;
 mod prefix_rename;
 mod quote_rework;
 mod runtime_when_targetcall;
 mod same_shell;
 mod shell_quoting_tests;
 mod stdin_args;
+mod stdio_tailer;

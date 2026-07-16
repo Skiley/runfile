@@ -13,10 +13,12 @@ NEVER use `cargo` commands!
 ALWAYS use `run <target>`, read `Runfile.json` to see available targets.
 
 ```
-run build                  # Debug build, both Windows and Linux (via WSL)
-run install                # Links the debug build to the global "run" command
-run lint                   # Formats, checks and lints the code, both using Windows and Linux (via WSL) due to OS-specific macros
-run test                   # Runs all tests, both using Windows and Linux (via WSL)
+run setup                  # One-time per clone: activates the committed git hooks
+run build                  # Debug build
+run check                  # Non-mutating gate: fmt --check + clippy (deny warnings) + cargo check
+run install                # Links the debug build to the global "rund" command
+run lint                   # Formats, checks and lints the code
+run test                   # Runs all tests
 ```
 
 ## Project Layout

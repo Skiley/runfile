@@ -2,7 +2,7 @@ use crate::tools::build_tool_defs;
 use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
 use rmcp::model::*;
 use rmcp::service::ServiceExt;
-use rmcp::{handler::server::ServerHandler, ErrorData as McpError};
+use rmcp::{ErrorData as McpError, handler::server::ServerHandler};
 use runfile_parser::Runfile;
 use std::path::PathBuf;
 

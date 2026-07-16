@@ -1,26 +1,33 @@
 name: CI
 
 on:
-  pull_request:
   push:
     branches: [master]
+  pull_request:
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
-      - uses: ./.github/actions/setup
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+
+      - name: Setup Runfile (from source)
+        uses: ./.github/actions/setup
         with:
           from-source: true
           global-files: Runfile-ci.json
-      - run: run ci:lint
+
+      - name: Check (format + clippy + type-check)
+        run: run ci:check
+
+      - name: Verify Cargo.lock is in sync
+        run: git diff --exit-code Cargo.lock
 
   test:
     name: Test (${{ matrix.os }})
@@ -28,12 +35,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-15, ubuntu-24.04, windows-2025]
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
-      - uses: ./.github/actions/setup
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+
+      - name: Setup Runfile (from source)
+        uses: ./.github/actions/setup
         with:
           from-source: true
           global-files: Runfile-ci.json
-      - run: run ci:test
+
+      - name: Test
+        run: run ci:test

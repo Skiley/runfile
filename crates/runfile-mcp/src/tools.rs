@@ -1,4 +1,4 @@
-use runfile_parser::{is_internal_target_name, CommandSpec, EnvValue, Runfile};
+use runfile_parser::{CommandSpec, EnvValue, Runfile, is_internal_target_name};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

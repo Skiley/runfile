@@ -1,5 +1,5 @@
 use super::*;
-use crate::runner::{run_target, RunError};
+use crate::runner::{RunError, run_target};
 use runfile_parser::parse_runfile;
 
 /// Read a log file written by the spawned shells and return its trimmed,

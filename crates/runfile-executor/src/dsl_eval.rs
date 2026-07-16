@@ -8,7 +8,7 @@
 //! [`crate::args::walk_template`]), so source refs and function calls work
 //! inside conditions exactly as they do elsewhere.
 
-use crate::args::{evaluate_arg, skip_nested_subst, walk_template, RunArgs, SubstitutionError};
+use crate::args::{RunArgs, SubstitutionError, evaluate_arg, skip_nested_subst, walk_template};
 use std::collections::{HashMap, HashSet};
 
 /// Whether `inner` (the body of a `{{ ... }}` block, after [`strict_unwrap`])

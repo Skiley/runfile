@@ -46,29 +46,31 @@ pub fn cmd_decrypt_file(source: Option<&str>, output: Option<&str>) {
 			continue;
 		}
 		// If it's a key=value line with an encrypted value, decrypt it
-		if !trimmed.is_empty() && !trimmed.starts_with('#') && !trimmed.starts_with("//") {
-			if let Some(eq_pos) = trimmed.find('=') {
-				let val_part = &trimmed[eq_pos + 1..];
-				let val_trimmed = val_part.trim();
-				// Strip quotes if present
-				let val_unquoted = if (val_trimmed.starts_with('"') && val_trimmed.ends_with('"'))
-					|| (val_trimmed.starts_with('\'') && val_trimmed.ends_with('\''))
-				{
-					&val_trimmed[1..val_trimmed.len() - 1]
-				} else {
-					val_trimmed
-				};
-				if runfile_crypto::is_encrypted(val_unquoted) {
-					let key_part = &trimmed[..eq_pos];
-					match runfile_crypto::decrypt(val_unquoted, &key_hex) {
-						Ok(plaintext) => {
-							out_lines.push(format!("{key_part}={plaintext}"));
-							continue;
-						}
-						Err(e) => {
-							eprintln!("Error decrypting {key_part}: {e}");
-							process::exit(1);
-						}
+		if !trimmed.is_empty()
+			&& !trimmed.starts_with('#')
+			&& !trimmed.starts_with("//")
+			&& let Some(eq_pos) = trimmed.find('=')
+		{
+			let val_part = &trimmed[eq_pos + 1..];
+			let val_trimmed = val_part.trim();
+			// Strip quotes if present
+			let val_unquoted = if (val_trimmed.starts_with('"') && val_trimmed.ends_with('"'))
+				|| (val_trimmed.starts_with('\'') && val_trimmed.ends_with('\''))
+			{
+				&val_trimmed[1..val_trimmed.len() - 1]
+			} else {
+				val_trimmed
+			};
+			if runfile_crypto::is_encrypted(val_unquoted) {
+				let key_part = &trimmed[..eq_pos];
+				match runfile_crypto::decrypt(val_unquoted, &key_hex) {
+					Ok(plaintext) => {
+						out_lines.push(format!("{key_part}={plaintext}"));
+						continue;
+					}
+					Err(e) => {
+						eprintln!("Error decrypting {key_part}: {e}");
+						process::exit(1);
 					}
 				}
 			}

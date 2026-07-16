@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn cmd_env_value_with_ampersand_is_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -18,7 +18,7 @@ fn cmd_env_value_with_ampersand_is_quoted() {
 
 #[test]
 fn cmd_env_value_with_pipe_is_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -31,7 +31,7 @@ fn cmd_env_value_with_pipe_is_quoted() {
 
 #[test]
 fn cmd_env_value_with_angle_brackets_is_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -44,7 +44,7 @@ fn cmd_env_value_with_angle_brackets_is_quoted() {
 
 #[test]
 fn cmd_env_value_with_caret_is_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -57,7 +57,7 @@ fn cmd_env_value_with_caret_is_quoted() {
 
 #[test]
 fn cmd_env_value_with_percent_is_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -70,7 +70,7 @@ fn cmd_env_value_with_percent_is_quoted() {
 
 #[test]
 fn powershell_env_value_with_dollar_subexpression_not_expanded() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	// In double quotes, PowerShell would expand {{ whoami }}. Single quotes prevent this.
 	let commands = vec![ExtractedCommand {
@@ -85,7 +85,7 @@ fn powershell_env_value_with_dollar_subexpression_not_expanded() {
 
 #[test]
 fn powershell_env_value_with_backtick_is_literal() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -99,7 +99,7 @@ fn powershell_env_value_with_backtick_is_literal() {
 
 #[test]
 fn powershell_env_value_with_single_quote_is_escaped() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -113,7 +113,7 @@ fn powershell_env_value_with_single_quote_is_escaped() {
 
 #[test]
 fn powershell_env_value_with_double_quotes_is_literal() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -127,7 +127,7 @@ fn powershell_env_value_with_double_quotes_is_literal() {
 
 #[test]
 fn powershell_env_value_empty() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -140,7 +140,7 @@ fn powershell_env_value_empty() {
 
 #[test]
 fn powershell_env_value_with_variable_reference_not_expanded() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -154,7 +154,7 @@ fn powershell_env_value_with_variable_reference_not_expanded() {
 
 #[test]
 fn powershell_env_value_with_semicolon_does_not_break_out() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -168,7 +168,7 @@ fn powershell_env_value_with_semicolon_does_not_break_out() {
 
 #[test]
 fn cmd_env_value_simple_no_special_chars() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	// Even simple values get quoted in cmd.exe (defense in depth)
 	let commands = vec![ExtractedCommand {
@@ -182,7 +182,7 @@ fn cmd_env_value_simple_no_special_chars() {
 
 #[test]
 fn cmd_env_value_with_multiple_dangerous_chars() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -248,7 +248,7 @@ fn execute_failure_signals_through_status_not_error() {
 
 #[test]
 fn fish_env_value_with_single_quote_uses_close_escape_reopen() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -262,7 +262,7 @@ fn fish_env_value_with_single_quote_uses_close_escape_reopen() {
 
 #[test]
 fn fish_env_value_with_multiple_single_quotes() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -275,7 +275,7 @@ fn fish_env_value_with_multiple_single_quotes() {
 
 #[test]
 fn fish_env_value_with_dollar_sign_is_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -289,7 +289,7 @@ fn fish_env_value_with_dollar_sign_is_quoted() {
 
 #[test]
 fn fish_env_value_with_spaces() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -302,7 +302,7 @@ fn fish_env_value_with_spaces() {
 
 #[test]
 fn fish_env_value_with_backslash() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -316,7 +316,7 @@ fn fish_env_value_with_backslash() {
 
 #[test]
 fn fish_env_value_empty_string() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -330,7 +330,7 @@ fn fish_env_value_empty_string() {
 
 #[test]
 fn fish_env_value_simple_no_quoting() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -344,7 +344,7 @@ fn fish_env_value_simple_no_quoting() {
 
 #[test]
 fn fish_env_value_with_semicolon() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),

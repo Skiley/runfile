@@ -1,9 +1,9 @@
 use std::process::Child;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Whether a force-kill guard is currently active.
-static ACTIVE: AtomicBool = AtomicBool::new(false);
+pub(crate) static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Number of live `ForceKillGuard`s. `forceKillOnSigInt` targets dispatched
 /// concurrently (e.g. as `@dep`s from a `parallel: true` parent) each create a
@@ -14,12 +14,6 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 /// and one PID registry (a Ctrl+C then kills every tracked child, which is the
 /// desired behavior).
 static GUARD_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Serializes every test that touches the process-global force-kill state
-/// (`ACTIVE` / `GUARD_COUNT` / the PID registry), across both this module's
-/// tests and the platform submodule's.
-#[cfg(test)]
-static FORCE_KILL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// RAII guard that sets up a CTRL+C / SIGINT handler which forcefully kills
 /// all tracked child processes (and their descendants) when triggered.
@@ -75,7 +69,7 @@ impl Drop for ForceKillGuard {
 
 #[cfg(windows)]
 mod platform {
-	use super::{Mutex, ACTIVE};
+	use super::{ACTIVE, Mutex};
 	use std::process::Child;
 	use std::sync::atomic::Ordering;
 
@@ -86,7 +80,7 @@ mod platform {
 
 	static JOB_HANDLE: Mutex<Option<SendHandle>> = Mutex::new(None);
 
-	pub(super) fn setup() {
+	pub(crate) fn setup() {
 		let handle =
 			unsafe { windows_sys::Win32::System::JobObjects::CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
 		if !handle.is_null() {
@@ -94,7 +88,7 @@ mod platform {
 		}
 	}
 
-	pub(super) fn teardown() {
+	pub(crate) fn teardown() {
 		if let Some(SendHandle(handle)) = JOB_HANDLE.lock().unwrap().take() {
 			unsafe {
 				windows_sys::Win32::Foundation::CloseHandle(handle);
@@ -102,7 +96,7 @@ mod platform {
 		}
 	}
 
-	pub(super) fn add_child(child: &Child) {
+	pub(crate) fn add_child(child: &Child) {
 		if let Some(SendHandle(handle)) = &*JOB_HANDLE.lock().unwrap() {
 			use std::os::windows::io::AsRawHandle;
 			unsafe {
@@ -115,15 +109,15 @@ mod platform {
 	}
 
 	/// No-op on Windows: the Job Object already tracks descendants.
-	pub(super) fn prepare_command(_cmd: &mut std::process::Command) {}
+	pub(crate) fn prepare_command(_cmd: &mut std::process::Command) {}
 
-	pub(super) fn install_handler() {
+	pub(crate) fn install_handler() {
 		unsafe {
 			windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(ctrl_handler), 1);
 		}
 	}
 
-	pub(super) fn uninstall_handler() {
+	pub(crate) fn uninstall_handler() {
 		unsafe {
 			windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(ctrl_handler), 0);
 		}
@@ -135,8 +129,10 @@ mod platform {
 		}
 
 		// Terminate all processes in the job
-		if let Ok(guard) = JOB_HANDLE.lock() {
-			if let Some(SendHandle(handle)) = &*guard {
+		if let Ok(guard) = JOB_HANDLE.lock()
+			&& let Some(SendHandle(handle)) = &*guard
+		{
+			unsafe {
 				windows_sys::Win32::System::JobObjects::TerminateJobObject(*handle, 1);
 			}
 		}
@@ -150,8 +146,8 @@ mod platform {
 // ──── Unix implementation ────
 
 #[cfg(unix)]
-mod platform {
-	use super::{Mutex, ACTIVE};
+pub(crate) mod platform {
+	use super::{ACTIVE, Mutex};
 	use std::process::Child;
 	use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
@@ -163,27 +159,27 @@ mod platform {
 	/// `libc::kill` are async-signal-safe. 1024 comfortably covers the intended
 	/// use (GUI-subsystem apps that ignore console CTRL+C); children past the cap
 	/// are simply not force-killed (best-effort, same as any untracked process).
-	const MAX_TRACKED_PIDS: usize = 1024;
-	static CHILD_PIDS: [AtomicI32; MAX_TRACKED_PIDS] = [const { AtomicI32::new(0) }; MAX_TRACKED_PIDS];
-	static CHILD_COUNT: AtomicUsize = AtomicUsize::new(0);
+	pub(crate) const MAX_TRACKED_PIDS: usize = 1024;
+	pub(crate) static CHILD_PIDS: [AtomicI32; MAX_TRACKED_PIDS] = [const { AtomicI32::new(0) }; MAX_TRACKED_PIDS];
+	pub(crate) static CHILD_COUNT: AtomicUsize = AtomicUsize::new(0);
 	static PREV_HANDLER: Mutex<Option<libc::sighandler_t>> = Mutex::new(None);
 
-	pub(super) fn setup() {
+	pub(crate) fn setup() {
 		CHILD_COUNT.store(0, Ordering::SeqCst);
 	}
 
-	pub(super) fn teardown() {
+	pub(crate) fn teardown() {
 		CHILD_COUNT.store(0, Ordering::SeqCst);
 	}
 
-	pub(super) fn add_child(child: &Child) {
+	pub(crate) fn add_child(child: &Child) {
 		record_pid(child.id() as i32);
 	}
 
 	/// Place the child in its OWN process group so `kill(-pid, SIGKILL)` in the
 	/// SIGINT handler reaches the child AND its descendants. Must be applied
 	/// before spawn.
-	pub(super) fn prepare_command(cmd: &mut std::process::Command) {
+	pub(crate) fn prepare_command(cmd: &mut std::process::Command) {
 		use std::os::unix::process::CommandExt;
 		// SAFETY: `setpgid` is async-signal-safe and only reparents the
 		// about-to-exec child into a fresh process group; it touches no shared
@@ -199,19 +195,19 @@ mod platform {
 
 	/// Lock-free append of a PID into the tracking array. Split out so unit
 	/// tests can exercise the tracking logic without spawning real processes.
-	fn record_pid(pid: i32) {
+	pub(crate) fn record_pid(pid: i32) {
 		let idx = CHILD_COUNT.fetch_add(1, Ordering::SeqCst);
 		if idx < MAX_TRACKED_PIDS {
 			CHILD_PIDS[idx].store(pid, Ordering::SeqCst);
 		}
 	}
 
-	pub(super) fn install_handler() {
+	pub(crate) fn install_handler() {
 		let prev = unsafe { libc::signal(libc::SIGINT, sigint_handler as *const () as libc::sighandler_t) };
 		*PREV_HANDLER.lock().unwrap() = Some(prev);
 	}
 
-	pub(super) fn uninstall_handler() {
+	pub(crate) fn uninstall_handler() {
 		if let Some(prev) = PREV_HANDLER.lock().unwrap().take() {
 			unsafe {
 				libc::signal(libc::SIGINT, prev);
@@ -238,90 +234,5 @@ mod platform {
 				}
 			}
 		}
-	}
-
-	#[cfg(test)]
-	mod tests {
-		use super::*;
-
-		fn snapshot_tracked() -> Vec<i32> {
-			let n = CHILD_COUNT.load(Ordering::SeqCst).min(MAX_TRACKED_PIDS);
-			CHILD_PIDS.iter().take(n).map(|s| s.load(Ordering::SeqCst)).collect()
-		}
-
-		#[test]
-		fn record_and_reset_pids() {
-			let _g = super::super::FORCE_KILL_TEST_LOCK.lock().unwrap();
-			setup();
-			record_pid(111);
-			record_pid(222);
-			record_pid(333);
-			assert_eq!(snapshot_tracked(), vec![111, 222, 333]);
-			teardown();
-			assert!(snapshot_tracked().is_empty(), "teardown must reset the tracked count");
-		}
-
-		#[test]
-		fn record_beyond_cap_is_bounded_and_does_not_panic() {
-			let _g = super::super::FORCE_KILL_TEST_LOCK.lock().unwrap();
-			setup();
-			for i in 0..(MAX_TRACKED_PIDS + 50) {
-				record_pid((i as i32) + 1);
-			}
-			// The read side clamps to the cap — no out-of-bounds indexing.
-			let n = CHILD_COUNT.load(Ordering::SeqCst).min(MAX_TRACKED_PIDS);
-			assert_eq!(n, MAX_TRACKED_PIDS);
-			assert_eq!(snapshot_tracked().len(), MAX_TRACKED_PIDS);
-			teardown();
-		}
-	}
-}
-
-#[cfg(test)]
-mod guard_tests {
-	use super::*;
-
-	// Audit L12: concurrent force-kill targets used to clobber the shared
-	// handler/PID state — the first guard to drop deactivated force-kill for a
-	// still-running sibling. The refcount keeps `ACTIVE` true until the LAST
-	// guard drops.
-	#[test]
-	fn refcount_keeps_active_until_last_guard_drops() {
-		let _g = FORCE_KILL_TEST_LOCK.lock().unwrap();
-		assert!(!ACTIVE.load(Ordering::SeqCst), "no guards → inactive");
-		let a = ForceKillGuard::new();
-		assert!(ACTIVE.load(Ordering::SeqCst), "first guard activates");
-		let b = ForceKillGuard::new();
-		assert!(ACTIVE.load(Ordering::SeqCst), "still active with two guards");
-		drop(a);
-		assert!(ACTIVE.load(Ordering::SeqCst), "still active while one guard remains");
-		drop(b);
-		assert!(!ACTIVE.load(Ordering::SeqCst), "inactive after the last guard drops");
-	}
-
-	#[test]
-	fn single_guard_lifecycle() {
-		let _g = FORCE_KILL_TEST_LOCK.lock().unwrap();
-		assert!(!ACTIVE.load(Ordering::SeqCst));
-		{
-			let _guard = ForceKillGuard::new();
-			assert!(ACTIVE.load(Ordering::SeqCst));
-		}
-		assert!(!ACTIVE.load(Ordering::SeqCst));
-	}
-
-	// Audit L13: `prepare_command` adds a `setpgid` pre_exec so the child is its
-	// own process-group leader (letting the group-kill reach grandchildren).
-	// Verify it doesn't break normal execution.
-	#[cfg(unix)]
-	#[test]
-	fn prepared_command_still_spawns_and_runs() {
-		let _g = FORCE_KILL_TEST_LOCK.lock().unwrap();
-		let guard = ForceKillGuard::new();
-		let mut cmd = std::process::Command::new("true");
-		guard.prepare_command(&mut cmd);
-		let status = cmd.status().expect("child should spawn");
-		assert!(status.success(), "setpgid pre_exec must not break normal execution");
-		drop(guard);
 	}
 }

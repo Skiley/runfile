@@ -238,8 +238,8 @@ fn detach_evaluates_if_block_and_does_not_run_condition_as_shell() {
 	// piped into a shell where the first word ("windows") became a missing
 	// command. This test pins the fix: detach evaluates control-flow blocks
 	// at runtime and only spawns the chosen branch.
-	use crate::control_flow::{collect_detach_leaves, DetachFlattenError};
-	use runfile_parser::{parse_runfile, CommandStep};
+	use crate::control_flow::{DetachFlattenError, collect_detach_leaves};
+	use runfile_parser::{CommandStep, parse_runfile};
 	use std::collections::HashMap;
 
 	let json = r#"{

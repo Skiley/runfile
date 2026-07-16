@@ -7,7 +7,7 @@
 //! work), then dispatches by function name. The side-effecting `define` /
 //! `set_cwd` / `try` functions are handled before the bulk arg-eval pass.
 
-use crate::args::{evaluate_arg, parse_static_name, FuncCall, RunArgs, SubstitutionError};
+use crate::args::{FuncCall, RunArgs, SubstitutionError, evaluate_arg, parse_static_name};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 

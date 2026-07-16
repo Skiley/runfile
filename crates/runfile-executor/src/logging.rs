@@ -1,6 +1,6 @@
 use runfile_parser::CommandSpec;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 // ANSI escape codes — these work in all modern terminals including
@@ -18,9 +18,9 @@ const RED: &str = "\x1b[31m";
 // `allow(dead_code)` on non-Windows because only `console_mode_update` (and
 // the tests) reference them there.
 #[cfg_attr(not(windows), allow(dead_code))]
-const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
+pub(crate) const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
 #[cfg_attr(not(windows), allow(dead_code))]
-const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+pub(crate) const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
 
 /// Given the current Windows console mode, return the mode that should be set,
 /// or `None` if the bits we need are already on (so the caller can skip the
@@ -36,13 +36,9 @@ const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
 /// Pure bit math, extracted from [`enable_ansi_support`] so the behaviour is
 /// unit-testable without touching a real console handle.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn console_mode_update(current: u32) -> Option<u32> {
+pub(crate) fn console_mode_update(current: u32) -> Option<u32> {
 	let desired = current | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-	if desired == current {
-		None
-	} else {
-		Some(desired)
-	}
+	if desired == current { None } else { Some(desired) }
 }
 
 /// Tracks the global step number across an entire run, so that nested
@@ -233,7 +229,7 @@ pub fn log_total_timing(duration: Duration) {
 fn enable_ansi_support() {
 	use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 	use windows_sys::Win32::System::Console::{
-		GetConsoleMode, GetStdHandle, SetConsoleMode, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+		GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode,
 	};
 
 	for handle_id in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
@@ -250,114 +246,6 @@ fn enable_ansi_support() {
 			}
 			if let Some(desired) = console_mode_update(mode) {
 				let _ = SetConsoleMode(handle, desired);
-			}
-		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::{console_mode_update, ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING};
-
-	/// Both managed bits OR'd together — the end state we always converge to.
-	const BOTH: u32 = ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-
-	// A handful of plausible "unrelated" Windows console mode bits that our
-	// helper must never touch (ENABLE_WRAP_AT_EOL_OUTPUT, ENABLE_LVB_GRID, an
-	// arbitrary high bit).
-	const UNRELATED: u32 = 0x0002 | 0x0008 | 0x8000_0000;
-
-	#[test]
-	fn flag_values_match_win32_constants() {
-		// Guard the magic numbers against accidental edits — these are the
-		// documented Win32 console mode bits.
-		assert_eq!(ENABLE_PROCESSED_OUTPUT, 0x0001);
-		assert_eq!(ENABLE_VIRTUAL_TERMINAL_PROCESSING, 0x0004);
-	}
-
-	#[test]
-	fn enables_both_flags_from_zero() {
-		// The exact state after `wsl.exe` clears the console mode: neither flag
-		// set. We must turn both back on. This is the core regression case —
-		// the bug manifested as both ANSI escapes (`←[..m`) and `\n` (`◙`)
-		// rendering literally because both bits were off and never restored.
-		assert_eq!(console_mode_update(0), Some(BOTH));
-	}
-
-	#[test]
-	fn adds_processed_output_when_only_vt_present() {
-		// The previous implementation set ONLY VT, leaving `\n` rendering as
-		// `◙`. Ensure the missing ENABLE_PROCESSED_OUTPUT bit is added.
-		assert_eq!(console_mode_update(ENABLE_VIRTUAL_TERMINAL_PROCESSING), Some(BOTH));
-	}
-
-	#[test]
-	fn adds_vt_when_only_processed_present() {
-		assert_eq!(console_mode_update(ENABLE_PROCESSED_OUTPUT), Some(BOTH));
-	}
-
-	#[test]
-	fn no_update_when_both_already_set() {
-		// Already correct → no SetConsoleMode syscall needed.
-		assert_eq!(console_mode_update(BOTH), None);
-	}
-
-	#[test]
-	fn no_update_when_both_set_alongside_unrelated_bits() {
-		assert_eq!(console_mode_update(BOTH | UNRELATED), None);
-	}
-
-	#[test]
-	fn no_update_when_all_bits_set() {
-		// All bits set already includes our two → nothing to do.
-		assert_eq!(console_mode_update(u32::MAX), None);
-	}
-
-	#[test]
-	fn preserves_unrelated_bits_while_adding_ours() {
-		// We only OR our two bits in — every other mode flag must survive.
-		let got = console_mode_update(UNRELATED).expect("should need an update");
-		assert_eq!(got, UNRELATED | BOTH);
-		assert_eq!(got & UNRELATED, UNRELATED, "unrelated bits were cleared");
-	}
-
-	#[test]
-	fn is_idempotent() {
-		// Applying the computed mode again must report "no change" — proves the
-		// per-call re-assert converges and won't thrash SetConsoleMode.
-		let first = console_mode_update(0).expect("first update");
-		assert_eq!(console_mode_update(first), None);
-
-		let from_partial = console_mode_update(UNRELATED).expect("update from partial");
-		assert_eq!(console_mode_update(from_partial), None);
-	}
-
-	#[test]
-	fn only_ever_sets_our_two_bits_and_clears_nothing() {
-		// Exhaustive-ish sweep: for any input, the delta must be a subset of
-		// our two managed bits, and no existing bit may be cleared.
-		for current in [
-			0u32,
-			0x1,
-			0x2,
-			0x4,
-			0x5,
-			0x7,
-			0xFF,
-			0xFF00,
-			0x8000_0000,
-			UNRELATED,
-			u32::MAX,
-		] {
-			if let Some(desired) = console_mode_update(current) {
-				let changed = desired ^ current;
-				assert_eq!(changed & !BOTH, 0, "unexpected bits changed for {current:#x}");
-				assert_eq!(desired & current, current, "cleared bits for {current:#x}");
-				// Whenever an update is returned, both target bits end up set.
-				assert_eq!(desired & BOTH, BOTH, "both flags not set for {current:#x}");
-			} else {
-				// `None` is only valid when both bits were already present.
-				assert_eq!(current & BOTH, BOTH, "spurious None for {current:#x}");
 			}
 		}
 	}

@@ -1,5 +1,5 @@
-use crate::editorconfig::{serialize_json_with_indent, EditorConfigProps};
-use runfile_parser::{is_internal_target_name, CommandSpec, Runfile};
+use crate::editorconfig::{EditorConfigProps, serialize_json_with_indent};
+use runfile_parser::{CommandSpec, Runfile, is_internal_target_name};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 

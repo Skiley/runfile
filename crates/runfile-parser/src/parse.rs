@@ -11,10 +11,14 @@ pub enum ParseError {
 	#[error("Failed to parse Runfile: {0}")]
 	Json(#[from] json5::Error),
 
-	#[error("Runfile nesting is too deep (exceeds {0} levels of `{{`/`[`) — this guards against a stack-overflow crash from deeply-nested command trees")]
+	#[error(
+		"Runfile nesting is too deep (exceeds {0} levels of `{{`/`[`) — this guards against a stack-overflow crash from deeply-nested command trees"
+	)]
 	MaxNestingDepthExceeded(usize),
 
-	#[error("Empty $schema field — set it to \"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json\" or a schema URL")]
+	#[error(
+		"Empty $schema field — set it to \"https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json\" or a schema URL"
+	)]
 	EmptySchema,
 
 	#[error("Target name \"{0}\" must not start with ':' (reserved for built-in commands)")]
@@ -44,7 +48,9 @@ pub enum ParseError {
 	#[error("Alias \"{0}\" in target \"{1}\" is the same as the target name")]
 	AliasSameAsTarget(String, String),
 
-	#[error("Target \"{0}\" has detach: true with multiple commands but parallel is not enabled. Set parallel: true to use detach with multiple commands.")]
+	#[error(
+		"Target \"{0}\" has detach: true with multiple commands but parallel is not enabled. Set parallel: true to use detach with multiple commands."
+	)]
 	DetachRequiresParallel(String),
 
 	#[error("Invalid environment variable name \"{0}\" in {1}. Names must match [A-Za-z_][A-Za-z0-9_]*.")]
@@ -78,7 +84,9 @@ pub enum ParseError {
 	#[error("`match` block in {0} has an empty match expression")]
 	EmptyMatchExpression(String),
 
-	#[error("`match` block in {0} has no cases and no default — at least one of `cases` (with at least one entry) or `default` is required")]
+	#[error(
+		"`match` block in {0} has no cases and no default — at least one of `cases` (with at least one entry) or `default` is required"
+	)]
 	EmptyMatchCases(String),
 }
 

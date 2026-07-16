@@ -1,6 +1,6 @@
 use crate::runfile_helpers::canonicalize_clean;
 use runfile_settings::Settings;
-use runfile_shell::{detect_default_shell, resolve_shell, ShellKind};
+use runfile_shell::{ShellKind, detect_default_shell, resolve_shell};
 use std::path::PathBuf;
 use std::process;
 

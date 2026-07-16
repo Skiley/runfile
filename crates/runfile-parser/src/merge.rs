@@ -218,12 +218,11 @@ fn merge_runfiles_inner(
 		let global_dir = global_path.parent().unwrap_or(Path::new(".")).to_path_buf();
 
 		// Check onlyInDirectories filter
-		if let Some(globals) = &global_runfile.globals {
-			if let Some(only_dirs) = &globals.only_in_directories {
-				if !is_cwd_allowed(cwd, &global_dir, only_dirs) {
-					continue;
-				}
-			}
+		if let Some(globals) = &global_runfile.globals
+			&& let Some(only_dirs) = &globals.only_in_directories
+			&& !is_cwd_allowed(cwd, &global_dir, only_dirs)
+		{
+			continue;
 		}
 
 		let globals_ref = global_runfile.globals.as_ref();

@@ -172,10 +172,10 @@ pub fn derive_public_key(private_key_hex: &str) -> Result<String, CryptoError> {
 /// prevent timing side-channel attacks. Returns `None` if no match is found.
 pub fn find_matching_private_key(public_key_hex: &str, private_keys: &[String]) -> Option<String> {
 	for pk in private_keys {
-		if let Ok(derived) = derive_public_key(pk) {
-			if derived.as_bytes().ct_eq(public_key_hex.as_bytes()).into() {
-				return Some(pk.clone());
-			}
+		if let Ok(derived) = derive_public_key(pk)
+			&& derived.as_bytes().ct_eq(public_key_hex.as_bytes()).into()
+		{
+			return Some(pk.clone());
 		}
 	}
 	None
@@ -188,10 +188,10 @@ pub fn find_matching_private_key(public_key_hex: &str, private_keys: &[String]) 
 pub fn find_private_key_by_public_prefix(public_prefix: &str, private_keys: &[String]) -> Result<String, CryptoError> {
 	let mut matches: Vec<&String> = Vec::new();
 	for pk in private_keys {
-		if let Ok(derived) = derive_public_key(pk) {
-			if derived.starts_with(public_prefix) {
-				matches.push(pk);
-			}
+		if let Ok(derived) = derive_public_key(pk)
+			&& derived.starts_with(public_prefix)
+		{
+			matches.push(pk);
 		}
 	}
 	match matches.len() {

@@ -8,7 +8,7 @@ use crate::runfile_helpers::{load_or_create_runfile, runfile_for_generate, write
 /// running `echo Hello World` — works identically on every supported shell
 /// (bash/zsh/sh/fish/powershell/cmd) and demonstrates the bare-string
 /// `commands` sugar so users see the cleanest form by default.
-const INIT_TEMPLATE: &str = r#"{
+pub(crate) const INIT_TEMPLATE: &str = r#"{
 	"$schema": "https://github.com/Skiley/runfile/releases/latest/download/v0.schema.json",
 	"targets": {
 		"hello": {
@@ -214,7 +214,7 @@ pub fn cmd_generate_vscode_tasks(
 	include_globals: bool,
 ) {
 	use runfile_generators::{
-		generate_vscode_tasks, merge_vscode_tasks, render_vscode_tasks, EditorConfigProps, VsCodeTasksFile,
+		EditorConfigProps, VsCodeTasksFile, generate_vscode_tasks, merge_vscode_tasks, render_vscode_tasks,
 	};
 
 	let runfile = runfile_for_generate(file, include_namespaces, include_globals);
@@ -316,7 +316,7 @@ pub fn cmd_generate_zed_tasks(
 	include_namespaces: bool,
 	include_globals: bool,
 ) {
-	use runfile_generators::{generate_zed_tasks, merge_zed_tasks, render_zed_tasks, EditorConfigProps, ZedTask};
+	use runfile_generators::{EditorConfigProps, ZedTask, generate_zed_tasks, merge_zed_tasks, render_zed_tasks};
 
 	let runfile = runfile_for_generate(file, include_namespaces, include_globals);
 
@@ -408,8 +408,8 @@ pub fn cmd_generate_jetbrains_run_configs(
 	include_globals: bool,
 ) {
 	use runfile_generators::{
-		check_existing_jetbrains_config, generate_jetbrains_configs, is_jetbrains_config_ours, render_jetbrains_config,
-		EditorConfigProps, JetBrainsConfigCheck,
+		EditorConfigProps, JetBrainsConfigCheck, check_existing_jetbrains_config, generate_jetbrains_configs,
+		is_jetbrains_config_ours, render_jetbrains_config,
 	};
 	use std::collections::HashSet;
 
@@ -548,19 +548,5 @@ pub fn cmd_generate_jetbrains_run_configs(
 		for (file_name, reason) in &skipped {
 			eprintln!("    {file_name}: {reason}");
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::INIT_TEMPLATE;
-
-	#[test]
-	fn init_template_parses_as_runfile() {
-		// The template is a literal string, so the type system can't catch
-		// typos. Round-trip it through the parser to make sure `:init`
-		// always produces a file the rest of the toolchain accepts.
-		let runfile = runfile_parser::parse_runfile(INIT_TEMPLATE).expect("init template must parse");
-		assert!(runfile.targets.contains_key("hello"));
 	}
 }

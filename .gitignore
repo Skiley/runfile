@@ -1,24 +1,15 @@
-# Build artifacts
+# Build output
 /target/
 /target-linux/
 /target-mac/
 /target-windows/
-/npm-dist/
-/dist-artifacts/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# Editor / IDE — commit .claude/{agents,skills}; ignore the rest, and .idea
+/.claude/*
+!/.claude/agents/
+!/.claude/skills/
+/.idea/
 
 # OS
 .DS_Store
 Thumbs.db
-Desktop.ini
-
-# Claude
-/.claude/*
-!/.claude/agents/*
-!/.claude/skills/*

@@ -3,7 +3,7 @@
 // Mirrors the RUNFILE_TARGET pattern: the env var feeds a default into
 // `:env inject` / `:env decrypt` when no positional path is given.
 
-use crate::cmd_env::{env_file_target, RUNFILE_ENV_FILE_TARGET_ENV_VAR};
+use crate::cmd_env::{RUNFILE_ENV_FILE_TARGET_ENV_VAR, env_file_target};
 use std::sync::Mutex;
 
 static RUNFILE_ENV_FILE_TARGET_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -14,13 +14,17 @@ fn with_runfile_env_file_target<R>(value: Option<&str>, f: impl FnOnce() -> R) -
 		.unwrap_or_else(|e| e.into_inner());
 	let prev = std::env::var(RUNFILE_ENV_FILE_TARGET_ENV_VAR).ok();
 	match value {
-		Some(v) => std::env::set_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR, v),
-		None => std::env::remove_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR),
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		Some(v) => unsafe { std::env::set_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR, v) },
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		None => unsafe { std::env::remove_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR) },
 	}
 	let result = f();
 	match prev {
-		Some(v) => std::env::set_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR, v),
-		None => std::env::remove_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR),
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		Some(v) => unsafe { std::env::set_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR, v) },
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		None => unsafe { std::env::remove_var(RUNFILE_ENV_FILE_TARGET_ENV_VAR) },
 	}
 	result
 }

@@ -1,0 +1,17 @@
+{
+	"bin": {
+		"run": "bin/run.js"
+	},
+	"description": "Runfile CLI — an easy-to-use, batteries-included task runner",
+	"engines": {
+		"node": ">=16"
+	},
+	"files": [
+		"bin"
+	],
+	"homepage": "https://github.com/Skiley/runfile",
+	"license": "MIT",
+	"name": "@runfile/cli",
+	"repository": "https://github.com/Skiley/runfile",
+	"version": "0.0.0"
+}

@@ -265,7 +265,7 @@ struct EchoGuard {
 impl EchoGuard {
 	fn disable() -> Option<Self> {
 		use windows_sys::Win32::System::Console::{
-			GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, STD_INPUT_HANDLE,
+			ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
 		};
 		unsafe {
 			let handle = GetStdHandle(STD_INPUT_HANDLE);

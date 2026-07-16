@@ -1,31 +1,34 @@
 [package]
-name = "runfile-executor"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
 description = "Command execution engine for Runfile"
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "runfile-executor"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-base64 = { workspace = true }
-dirs = { workspace = true }
-globset = { workspace = true }
-hex = { workspace = true }
-md-5 = { workspace = true }
-regex = { workspace = true }
-serde_json = { workspace = true }
-sha2 = { workspace = true }
-shlex = { workspace = true }
-thiserror = { workspace = true }
-runfile-env = { path = "../runfile-env" }
-runfile-parser = { path = "../runfile-parser" }
-runfile-shell = { path = "../runfile-shell" }
-
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
+base64.workspace = true
+dirs.workspace = true
+globset.workspace = true
+hex.workspace = true
+md-5.workspace = true
+regex.workspace = true
+runfile-env.workspace = true
+runfile-parser.workspace = true
+runfile-shell.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+shlex.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-runfile-crypto = { path = "../runfile-crypto" }
-tempfile = { workspace = true }
+runfile-crypto.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

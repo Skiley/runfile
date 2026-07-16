@@ -18,10 +18,10 @@ pub const CONFIG_DIR_ENV_VAR: &str = "RUNFILE_CONFIG_DIR";
 /// - Linux/macOS: `~/.config/runfile/`
 /// - Windows: `%APPDATA%\runfile\`
 pub fn settings_dir() -> Option<PathBuf> {
-	if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV_VAR) {
-		if !dir.is_empty() {
-			return Some(PathBuf::from(dir));
-		}
+	if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV_VAR)
+		&& !dir.is_empty()
+	{
+		return Some(PathBuf::from(dir));
 	}
 	dirs::config_dir().map(|d| d.join("runfile"))
 }

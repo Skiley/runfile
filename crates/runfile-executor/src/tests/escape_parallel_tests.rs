@@ -142,7 +142,7 @@ fn check_env_case_duplicates_empty_env_ok() {
 
 #[test]
 fn extract_format_bash_value_with_single_quotes() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -156,7 +156,7 @@ fn extract_format_bash_value_with_single_quotes() {
 
 #[test]
 fn extract_format_bash_value_with_dollar() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -170,7 +170,7 @@ fn extract_format_bash_value_with_dollar() {
 
 #[test]
 fn extract_format_bash_empty_value_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -184,7 +184,7 @@ fn extract_format_bash_empty_value_quoted() {
 
 #[test]
 fn extract_format_powershell_value_with_double_quotes() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -198,7 +198,7 @@ fn extract_format_powershell_value_with_double_quotes() {
 
 #[test]
 fn extract_format_powershell_empty_value() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -211,7 +211,7 @@ fn extract_format_powershell_empty_value() {
 
 #[test]
 fn extract_format_fish_value_with_single_quotes() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -230,7 +230,7 @@ fn extract_format_fish_value_with_single_quotes() {
 
 #[test]
 fn extract_format_cmd_multiple_env_vars() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -247,7 +247,7 @@ fn extract_format_cmd_multiple_env_vars() {
 
 #[test]
 fn extract_format_bash_simple_value_not_quoted() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -276,7 +276,7 @@ fn logging_default_spec_none() {
 
 #[test]
 fn run_target_unknown_target_errors() {
-	use crate::runner::{run_target, RunError};
+	use crate::runner::{RunError, run_target};
 	use runfile_parser::Runfile;
 
 	let json = r#"{
@@ -520,7 +520,7 @@ fn env_block_sees_decrypted_envfile_values() {
 
 #[test]
 fn extract_format_bash_value_with_special_chars() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -538,7 +538,7 @@ fn extract_format_bash_value_with_special_chars() {
 
 #[test]
 fn extract_format_bash_value_with_tab_and_newline() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo test".to_string(),
@@ -651,7 +651,7 @@ fn format_target_call_label_variants() {
 
 #[test]
 fn execute_error_failure_detail_classifies() {
-	use crate::executor::{execute_error_failure_detail, ExecuteError};
+	use crate::executor::{ExecuteError, execute_error_failure_detail};
 	assert_eq!(
 		execute_error_failure_detail(&ExecuteError::NonZeroExit("cmd".into(), 1)),
 		"exit code 1"
@@ -670,7 +670,7 @@ fn execute_error_failure_detail_classifies() {
 
 #[test]
 fn dep_result_failure_detail_returns_none_when_no_failures() {
-	use crate::executor::{dep_result_failure_detail, ExecutionResult};
+	use crate::executor::{ExecutionResult, dep_result_failure_detail};
 	use std::process::ExitStatus;
 	#[cfg(unix)]
 	let success = {
@@ -692,7 +692,7 @@ fn dep_result_failure_detail_returns_none_when_no_failures() {
 
 #[test]
 fn dep_result_failure_detail_uses_final_exit_code() {
-	use crate::executor::{dep_result_failure_detail, ExecutionResult};
+	use crate::executor::{ExecutionResult, dep_result_failure_detail};
 	use std::process::ExitStatus;
 	#[cfg(unix)]
 	let nonzero = {

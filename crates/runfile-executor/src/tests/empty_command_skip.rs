@@ -58,7 +58,7 @@ fn empty_command_decrements_step_counter_total() {
 	// visible `(N/total)` ratio reflects only commands that will
 	// actually run. Verifying via the externally-provided counter
 	// (rather than via stderr) makes the test deterministic.
-	use crate::executor::{execute_command_with_counter, NoOpDependencyResolver};
+	use crate::executor::{NoOpDependencyResolver, execute_command_with_counter};
 	use crate::logging::StepCounter;
 
 	let dir = TempDir::new().unwrap();
@@ -108,7 +108,7 @@ fn empty_command_in_parallel_decrements_total() {
 	// drops empty leaves at planning time, and the step counter
 	// total must shrink to match — otherwise the user sees
 	// `(2/4) [parallel]` for what is genuinely a 2-leaf batch.
-	use crate::executor::{execute_parallel_with_counter, NoOpDependencyResolver};
+	use crate::executor::{NoOpDependencyResolver, execute_parallel_with_counter};
 	use crate::logging::StepCounter;
 
 	let dir = TempDir::new().unwrap();

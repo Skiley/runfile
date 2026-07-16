@@ -5,7 +5,7 @@ use super::*;
 // Env vars are process-global, so all tests in this section serialize via
 // `RUNFILE_TARGET_TEST_LOCK` to avoid clobbering each other.
 
-use crate::runfile_helpers::{resolve_runfile_path, runfile_target_env, RUNFILE_TARGET_ENV_VAR};
+use crate::runfile_helpers::{RUNFILE_TARGET_ENV_VAR, resolve_runfile_path, runfile_target_env};
 use std::sync::Mutex;
 
 static RUNFILE_TARGET_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -16,13 +16,17 @@ fn with_runfile_target<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
 	let _guard = RUNFILE_TARGET_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 	let prev = std::env::var(RUNFILE_TARGET_ENV_VAR).ok();
 	match value {
-		Some(v) => std::env::set_var(RUNFILE_TARGET_ENV_VAR, v),
-		None => std::env::remove_var(RUNFILE_TARGET_ENV_VAR),
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		Some(v) => unsafe { std::env::set_var(RUNFILE_TARGET_ENV_VAR, v) },
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		None => unsafe { std::env::remove_var(RUNFILE_TARGET_ENV_VAR) },
 	}
 	let result = f();
 	match prev {
-		Some(v) => std::env::set_var(RUNFILE_TARGET_ENV_VAR, v),
-		None => std::env::remove_var(RUNFILE_TARGET_ENV_VAR),
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		Some(v) => unsafe { std::env::set_var(RUNFILE_TARGET_ENV_VAR, v) },
+		// TODO: Audit that the environment access only happens in single-threaded code.
+		None => unsafe { std::env::remove_var(RUNFILE_TARGET_ENV_VAR) },
 	}
 	result
 }

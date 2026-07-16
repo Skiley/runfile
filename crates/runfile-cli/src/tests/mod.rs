@@ -1,8 +1,8 @@
-use crate::completions::{
-	completions_install_profile, completions_uninstall_profile, BASH_COMPLETION, FISH_COMPLETION,
-	POWERSHELL_COMPLETION, ZSH_COMPLETION,
-};
 use crate::Cli;
+use crate::completions::{
+	BASH_COMPLETION, FISH_COMPLETION, POWERSHELL_COMPLETION, ZSH_COMPLETION, completions_install_profile,
+	completions_uninstall_profile,
+};
 use clap::{CommandFactory, Parser};
 use std::fs;
 
@@ -23,8 +23,13 @@ fn find_subcommand<'a>(cmd: &'a clap::Command, name: &str) -> &'a clap::Command 
 		.unwrap_or_else(|| panic!("subcommand '{name}' not found"))
 }
 
+mod ci_detect;
 mod cli_parse;
 mod cli_structure;
+mod cmd_env;
+mod cmd_run;
+mod cmd_update;
+mod cmd_utilities;
 mod completion_refs;
 mod completions;
 mod env_file_target;

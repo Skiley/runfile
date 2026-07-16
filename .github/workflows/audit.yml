@@ -1,0 +1,25 @@
+name: Security audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+
+      - name: Install cargo-audit (pinned)
+        run: cargo install cargo-audit --version 0.21.2 --locked
+
+      - name: Setup Runfile
+        uses: ./.github/actions/setup
+
+      - name: Audit dependencies
+        run: run audit

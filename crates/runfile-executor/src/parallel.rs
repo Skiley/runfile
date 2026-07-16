@@ -11,14 +11,14 @@
 use crate::args::{LoopVarGuard, RunArgs};
 use crate::control_flow::{evaluate_if_condition, expand_for_iterations, resolve_match_branch};
 use crate::executor::{
-	dep_result_failure_detail, execute_error_failure_detail, format_target_call_label, resolve_target_call_argv,
 	DependencyResolver, ExecSetup, ExecuteError, ExecutionResult, IgnoreSigint, ProcessTreeTracker, WalkState,
+	dep_result_failure_detail, execute_error_failure_detail, format_target_call_label, resolve_target_call_argv,
 };
 use crate::force_kill::ForceKillGuard;
-use crate::logging::{log_command, log_parallel_command, log_parallel_failure_summary, StepCounter};
+use crate::logging::{StepCounter, log_command, log_parallel_command, log_parallel_failure_summary};
 use crate::parallel_output::{
-	flush_writer_thread, format_parallel_prefix, line_prefixing_enabled, shell_prefix_label, spawn_line_pump,
-	OutputStream,
+	OutputStream, flush_writer_thread, format_parallel_prefix, line_prefixing_enabled, shell_prefix_label,
+	spawn_line_pump,
 };
 use runfile_parser::{CommandStep, WhenCondition};
 use runfile_shell::ResolvedShell;

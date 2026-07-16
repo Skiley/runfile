@@ -1,40 +1,42 @@
 [package]
-name = "runfile-cli"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
+default-run = "run"
 description = "Runfile CLI — an easy-to-use, batteries-included task runner"
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "runfile-cli"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [[bin]]
 name = "run"
 path = "src/main.rs"
 
 [dependencies]
-serde_json = { workspace = true }
-clap = { workspace = true }
-dirs = { workspace = true }
-runfile-parser = { path = "../runfile-parser" }
-runfile-shell = { path = "../runfile-shell" }
-runfile-settings = { path = "../runfile-settings" }
-runfile-crypto = { path = "../runfile-crypto" }
-hex = { workspace = true }
-runfile-env = { path = "../runfile-env" }
-runfile-executor = { path = "../runfile-executor" }
-runfile-converters = { path = "../runfile-converters" }
-runfile-generators = { path = "../runfile-generators" }
-runfile-mcp = { path = "../runfile-mcp" }
-tokio = { workspace = true }
-notify = { workspace = true }
-globset = { workspace = true }
-which = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
+clap.workspace = true
+dirs.workspace = true
+globset.workspace = true
+hex.workspace = true
+notify.workspace = true
+runfile-converters.workspace = true
+runfile-crypto.workspace = true
+runfile-env.workspace = true
+runfile-executor.workspace = true
+runfile-generators.workspace = true
+runfile-mcp.workspace = true
+runfile-parser.workspace = true
+runfile-settings.workspace = true
+runfile-shell.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+which.workspace = true
 
 [dev-dependencies]
-tempfile = { workspace = true }
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

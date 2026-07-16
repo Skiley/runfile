@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process;
 
-use runfile_parser::{discover_runfile_cwd, RUNFILE_NAME};
+use runfile_parser::{RUNFILE_NAME, discover_runfile_cwd};
 
 use crate::runfile_helpers::resolve_and_merge;
 use crate::runfile_helpers::resolve_runfile_path;

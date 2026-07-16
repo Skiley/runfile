@@ -19,7 +19,7 @@
 use crate::args::{LoopVarGuard, RunArgs, SubstitutionError};
 use globset::{Glob, GlobSetBuilder};
 use runfile_parser::{
-	walk_step_templates, CommandStep, DslExpr, DslValue, ForStep, IfStep, MatchStep, WhenCondition, WhenStep,
+	CommandStep, DslExpr, DslValue, ForStep, IfStep, MatchStep, WhenCondition, WhenStep, walk_step_templates,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,7 +34,9 @@ pub enum ControlFlowError {
 	#[error("Internal error: `if` condition was not pre-parsed (this is a bug)")]
 	UnparsedCondition,
 
-	#[error("`if` condition `{condition}` resolved to {resolved:?}, which is not a boolean. The condition must resolve to exactly the string \"true\" (truthy), \"false\" (falsy), or \"\" (empty, also falsy). Wrap in a boolean DSL expression — e.g. `{{{{ {condition} == 'value' }}}}` — or compare explicitly.")]
+	#[error(
+		"`if` condition `{condition}` resolved to {resolved:?}, which is not a boolean. The condition must resolve to exactly the string \"true\" (truthy), \"false\" (falsy), or \"\" (empty, also falsy). Wrap in a boolean DSL expression — e.g. `{{{{ {condition} == 'value' }}}}` — or compare explicitly."
+	)]
 	IfConditionNotBoolean { condition: String, resolved: String },
 
 	#[error("Failed to expand `for glob` pattern \"{0}\": {1}")]
@@ -488,11 +490,7 @@ pub fn walk_templates<F: FnMut(&str)>(steps: &[CommandStep], mut visit: F) {
 /// for iteration.
 pub fn make_absolute(p: &str, working_dir: &Path) -> PathBuf {
 	let pb = PathBuf::from(p);
-	if pb.is_absolute() {
-		pb
-	} else {
-		working_dir.join(pb)
-	}
+	if pb.is_absolute() { pb } else { working_dir.join(pb) }
 }
 
 /// Context for [`collect_shell_only_leaves`] — drives the error message when

@@ -4,25 +4,28 @@
 		"addToPath": [
 			"target/debug"
 		],
+		"env": {
+			"CARGO_TERM_COLOR": "always"
+		},
 		"forceShell": "sh",
 		"logging": true
 	},
 	"targets": {
 		"ci:build": {
-			"description": "Build all crates in release mode",
-			"commands": "cargo build --release {{ ARGS }}"
+			"commands": "cargo build --locked --release {{ ARGS }}",
+			"description": "Release build for CI runners (default target dir)"
 		},
-		"ci:lint": {
-			"description": "Check formatting and run Clippy with warnings as errors",
+		"ci:check": {
 			"commands": [
-				"cargo check",
 				"cargo fmt --all -- --check",
-				"cargo clippy --all-targets --all-features -- -D warnings"
-			]
+				"cargo clippy --all-targets --all-features --locked -- -D warnings",
+				"cargo check --all-targets --all-features --locked"
+			],
+			"description": "Non-mutating CI gate: format check + Clippy (deny warnings) + type/borrow check"
 		},
 		"ci:test": {
-			"description": "Run all workspace tests",
-			"commands": "cargo test --workspace"
+			"commands": "cargo test --workspace --all-features --locked {{ ARGS }}",
+			"description": "Run all workspace tests (default target dir)"
 		}
 	}
 }

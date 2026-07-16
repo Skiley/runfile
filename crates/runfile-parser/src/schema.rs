@@ -1080,10 +1080,10 @@ impl Runfile {
 			return Some(name);
 		}
 		for (target_name, spec) in &self.targets {
-			if let Some(aliases) = &spec.aliases {
-				if aliases.iter().any(|a| a == name) {
-					return Some(target_name);
-				}
+			if let Some(aliases) = &spec.aliases
+				&& aliases.iter().any(|a| a == name)
+			{
+				return Some(target_name);
 			}
 		}
 		None

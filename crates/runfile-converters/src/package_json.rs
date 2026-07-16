@@ -74,11 +74,12 @@ pub fn convert_package_json_scripts(
 				pre_hooks.insert(base.to_string(), cmd.to_string());
 				hook_names.insert(name.clone());
 			}
-		} else if let Some(base) = name.strip_prefix("post") {
-			if !base.is_empty() && all_names.contains(base) {
-				post_hooks.insert(base.to_string(), cmd.to_string());
-				hook_names.insert(name.clone());
-			}
+		} else if let Some(base) = name.strip_prefix("post")
+			&& !base.is_empty()
+			&& all_names.contains(base)
+		{
+			post_hooks.insert(base.to_string(), cmd.to_string());
+			hook_names.insert(name.clone());
 		}
 	}
 

@@ -1,13 +1,16 @@
 [package]
-name = "runfile-env"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
 description = "Environment variable building for Runfile"
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "runfile-env"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-runfile-crypto = { path = "../runfile-crypto" }
-thiserror = { workspace = true }
+runfile-crypto.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = { workspace = true }
+tempfile.workspace = true

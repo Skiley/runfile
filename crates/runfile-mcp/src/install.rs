@@ -62,14 +62,14 @@ fn write_json_config(path: &Path, snippet: &serde_json::Value) -> InstallResult 
 		.unwrap()
 		.insert("runfile".to_string(), snippet.clone());
 
-	if let Some(parent) = path.parent() {
-		if let Err(e) = std::fs::create_dir_all(parent) {
-			eprintln!("Error creating {}: {e}", parent.display());
-			return InstallResult::Instructions(format!(
-				"Could not create directory {}. Please create it manually and re-run.",
-				parent.display()
-			));
-		}
+	if let Some(parent) = path.parent()
+		&& let Err(e) = std::fs::create_dir_all(parent)
+	{
+		eprintln!("Error creating {}: {e}", parent.display());
+		return InstallResult::Instructions(format!(
+			"Could not create directory {}. Please create it manually and re-run.",
+			parent.display()
+		));
 	}
 
 	let json = serde_json::to_string_pretty(&config).unwrap();

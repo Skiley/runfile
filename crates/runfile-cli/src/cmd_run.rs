@@ -1,9 +1,9 @@
 use runfile_executor::{
-	extract_target_with_cwd, format_extracted_commands, log_total_timing, run_target_with_cwd,
-	InteractiveStdinPrompter, LazyPrivateKeys, RunArgs, RunContext, StdinPrompter,
+	InteractiveStdinPrompter, LazyPrivateKeys, RunArgs, RunContext, StdinPrompter, extract_target_with_cwd,
+	format_extracted_commands, log_total_timing, run_target_with_cwd,
 };
-use runfile_parser::{is_internal_target_name, CommandSpec, Runfile, SourceKind};
-use runfile_settings::{keyring_keys, Settings};
+use runfile_parser::{CommandSpec, Runfile, SourceKind, is_internal_target_name};
+use runfile_settings::{Settings, keyring_keys};
 use runfile_shell::ResolvedShell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -118,10 +118,12 @@ pub fn cmd_list(file: Option<&std::path::Path>) {
 	for (file_path, kind) in &seen_files {
 		let mut targets_in_group: BTreeMap<&String, &CommandSpec> = BTreeMap::new();
 		for (name, (src_file, src_kind)) in target_sources {
-			if src_file == file_path && src_kind == kind && !is_internal_target_name(name) {
-				if let Some(spec) = runfile.targets.get(name) {
-					targets_in_group.insert(name, spec);
-				}
+			if src_file == file_path
+				&& src_kind == kind
+				&& !is_internal_target_name(name)
+				&& let Some(spec) = runfile.targets.get(name)
+			{
+				targets_in_group.insert(name, spec);
 			}
 		}
 		if !targets_in_group.is_empty() {
@@ -178,20 +180,20 @@ pub fn cmd_list(file: Option<&std::path::Path>) {
 
 /// Format a file path for display: use filename if in current dir, otherwise relative or absolute.
 fn display_file_path(path: &std::path::Path) -> String {
-	if let Ok(cwd) = std::env::current_dir() {
-		if let Ok(rel) = path.strip_prefix(&cwd) {
-			let rel_str = rel.to_string_lossy();
-			if rel_str.contains('/') || rel_str.contains('\\') {
-				return format!("./{}", rel_str.replace('\\', "/"));
-			}
-			return rel_str.to_string();
+	if let Ok(cwd) = std::env::current_dir()
+		&& let Ok(rel) = path.strip_prefix(&cwd)
+	{
+		let rel_str = rel.to_string_lossy();
+		if rel_str.contains('/') || rel_str.contains('\\') {
+			return format!("./{}", rel_str.replace('\\', "/"));
 		}
+		return rel_str.to_string();
 	}
 	// Try to use ~ for home directory
-	if let Some(home) = dirs::home_dir() {
-		if let Ok(rel) = path.strip_prefix(&home) {
-			return format!("~/{}", rel.to_string_lossy().replace('\\', "/"));
-		}
+	if let Some(home) = dirs::home_dir()
+		&& let Ok(rel) = path.strip_prefix(&home)
+	{
+		return format!("~/{}", rel.to_string_lossy().replace('\\', "/"));
 	}
 	path.to_string_lossy().to_string()
 }
@@ -237,7 +239,7 @@ fn print_target(name: &str, spec: &CommandSpec, col_width: usize) {
 /// Truncate a `:list` command preview to at most `max` CHARACTERS (not bytes),
 /// appending `...` when truncated. Byte slicing (`&full[..max]`) panics when a
 /// multi-byte UTF-8 character straddles the byte boundary.
-fn truncate_preview(full: &str, max: usize) -> String {
+pub(crate) fn truncate_preview(full: &str, max: usize) -> String {
 	if full.chars().count() <= max {
 		full.to_string()
 	} else {
@@ -536,40 +538,5 @@ pub fn cmd_watch(
 		runfile_executor::cleanup_temp_artifacts();
 
 		eprintln!("{BOLD}{CYAN}[runfile]{RESET} {DIM}Watching for changes... (Ctrl+C to stop){RESET}");
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::truncate_preview;
-
-	#[test]
-	fn short_ascii_preview_is_unchanged() {
-		assert_eq!(truncate_preview("echo hi", 60), "echo hi");
-	}
-
-	#[test]
-	fn long_ascii_preview_is_truncated_with_ellipsis() {
-		let full = "a".repeat(100);
-		let out = truncate_preview(&full, 60);
-		assert_eq!(out.chars().count(), 63); // 60 + "..."
-		assert!(out.ends_with("..."));
-	}
-
-	#[test]
-	fn multibyte_preview_does_not_panic_and_truncates_by_char() {
-		// Audit L3: a multi-byte character straddling the byte boundary used to
-		// panic under `&full[..60]`. Each `é` is 2 bytes, so byte index 60 lands
-		// mid-character. Char-safe truncation must not panic.
-		let full = "é".repeat(100); // 200 bytes, 100 chars
-		let out = truncate_preview(&full, 60);
-		assert_eq!(out.chars().count(), 63);
-		assert!(out.ends_with("..."));
-	}
-
-	#[test]
-	fn exactly_max_chars_not_truncated() {
-		let full = "x".repeat(60);
-		assert_eq!(truncate_preview(&full, 60), full);
 	}
 }

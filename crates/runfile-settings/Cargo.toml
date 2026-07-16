@@ -1,29 +1,32 @@
 [package]
-name = "runfile-settings"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
 description = "Local settings management for Runfile"
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "runfile-settings"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-json5 = { workspace = true }
-thiserror = { workspace = true }
-dirs = { workspace = true }
-runfile-parser = { path = "../runfile-parser" }
-runfile-crypto = { path = "../runfile-crypto" }
-keyring-core = { workspace = true }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-native-keyring-store = { workspace = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-apple-native-keyring-store = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-linux-keyutils-keyring-store = { workspace = true }
-secret-service = { workspace = true }
+dirs.workspace = true
+json5.workspace = true
+keyring-core.workspace = true
+runfile-crypto.workspace = true
+runfile-parser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = { workspace = true }
+tempfile.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-keyutils-keyring-store.workspace = true
+secret-service.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store.workspace = true

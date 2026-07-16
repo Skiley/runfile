@@ -10,10 +10,172 @@ on:
         required: true
 
 jobs:
+  build:
+    name: Build (${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: macos-15
+            target: x86_64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.platform.target }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+        with:
+          target: ${{ matrix.platform.target }}
+
+      - name: Install musl tools
+        if: contains(matrix.platform.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Setup Runfile
+        uses: ./.github/actions/setup
+        with:
+          global-files: Runfile-ci.json
+
+      - name: Build release binary
+        run: run ci:build
+
+      - name: Package archive
+        shell: bash
+        run: |
+          bin=run
+          case "$CARGO_BUILD_TARGET" in *windows*) bin=run.exe ;; esac
+          dir="runfile-cli-$CARGO_BUILD_TARGET"
+          mkdir "$dir"
+          cp "target/$CARGO_BUILD_TARGET/release/$bin" "$dir/"
+          cp README.md "$dir/"
+          case "$CARGO_BUILD_TARGET" in
+            *windows*) 7z a "$dir.zip" "./$dir" ;;
+            *) tar -cJf "$dir.tar.xz" "$dir" ;;
+          esac
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          if-no-files-found: error
+          name: ${{ matrix.platform.target }}
+          path: |
+            runfile-cli-*.tar.xz
+            runfile-cli-*.zip
+
   release:
-    uses: Skiley/rust-binary-publish/.github/workflows/release.yml@v3.0.0
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Verify tag matches the workspace version
+        run: grep -Fxq "version = \"${TAG#v}\"" Cargo.toml
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v5.0.0
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Stage installers and schema
+        run: cp .github/release-assets/install.sh .github/release-assets/install.ps1 schemas/v0.schema.json dist/
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum * > sha256.sum
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2.4.0
+        with:
+          fail_on_unmatched_files: true
+          files: dist/*
+          generate_release_notes: true
+          tag_name: ${{ inputs.tag || github.ref_name }}
+
+  npm:
+    name: Publish npm package
+    needs: [build, release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
       id-token: write
-    with:
-      tag: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v5.0.0
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Assemble npm package
+        shell: bash
+        run: |
+          pkg="$RUNNER_TEMP/npm-pkg"
+          mkdir -p "$pkg/bin"
+          cp npm/package.json "$pkg/"
+          cp npm/run.js "$pkg/bin/"
+          cp README.md "$pkg/"
+          declare -A map=(
+            [aarch64-apple-darwin]=darwin-arm64
+            [aarch64-pc-windows-msvc]=win32-arm64
+            [aarch64-unknown-linux-musl]=linux-arm64
+            [x86_64-apple-darwin]=darwin-x64
+            [x86_64-pc-windows-msvc]=win32-x64
+            [x86_64-unknown-linux-musl]=linux-x64
+          )
+          for target in "${!map[@]}"; do
+            plat="${map[$target]}"
+            mkdir -p "$pkg/bin/$plat"
+            case "$target" in
+              *windows*)
+                unzip -q "dist/runfile-cli-$target.zip" -d "$RUNNER_TEMP/x-$target"
+                cp "$RUNNER_TEMP/x-$target/runfile-cli-$target/run.exe" "$pkg/bin/$plat/"
+                ;;
+              *)
+                tar -xJf "dist/runfile-cli-$target.tar.xz" -C "$RUNNER_TEMP"
+                cp "$RUNNER_TEMP/runfile-cli-$target/run" "$pkg/bin/$plat/"
+                chmod +x "$pkg/bin/$plat/run"
+                ;;
+            esac
+          done
+          cd "$pkg" && npm pkg set version="${TAG#v}"
+          echo "PKG_DIR=$pkg" >> "$GITHUB_ENV"
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+
+      - name: Publish
+        run: npm publish --access public
+        working-directory: ${{ env.PKG_DIR }}

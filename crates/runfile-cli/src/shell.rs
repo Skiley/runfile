@@ -1,5 +1,5 @@
 use runfile_settings::Settings;
-use runfile_shell::{detect_default_shell, resolve_shell, resolve_shell_from_path, ResolvedShell};
+use runfile_shell::{ResolvedShell, detect_default_shell, resolve_shell, resolve_shell_from_path};
 use std::process;
 
 pub fn resolve_shell_for_runfile(command_shell: Option<&str>, settings: &Settings) -> ResolvedShell {

@@ -1,11 +1,14 @@
 [package]
-name = "runfile-shell"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
 description = "Shell detection, finding, and cross-platform shell support"
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "runfile-shell"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-serde = { workspace = true }
-thiserror = { workspace = true }
-which = { workspace = true }
+serde.workspace = true
+thiserror.workspace = true
+which.workspace = true

@@ -1,6 +1,6 @@
 use runfile_parser::{
-	discover_runfile_cwd, merge_runfiles, parse_runfile_from_path, CommandSpec, MergeResult, Runfile, SourceKind,
-	RUNFILE_NAME,
+	CommandSpec, MergeResult, RUNFILE_NAME, Runfile, SourceKind, discover_runfile_cwd, merge_runfiles,
+	parse_runfile_from_path,
 };
 use runfile_settings::Settings;
 use std::collections::HashMap;

@@ -146,7 +146,7 @@ fn extract_detects_cycles() {
 	// `@target` cycles are now detected at extract time too (per-call-stack
 	// tracking inside the recursive walker). A cyclic Runfile yields an
 	// `ExtractError::CycleDetected` instead of an infinite loop.
-	use crate::extract::{extract_target, ExtractError};
+	use crate::extract::{ExtractError, extract_target};
 	use runfile_parser::parse_runfile;
 
 	let json = r#"{
@@ -561,7 +561,7 @@ fn extract_missing_required_arg_errors() {
 
 #[test]
 fn extract_format_powershell() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "npm run build".to_string(),
@@ -577,7 +577,7 @@ fn extract_format_powershell() {
 
 #[test]
 fn extract_format_cmd() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "npm run build".to_string(),
@@ -596,7 +596,7 @@ fn extract_format_cmd() {
 
 #[test]
 fn extract_format_fish() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "npm run build".to_string(),
@@ -609,7 +609,7 @@ fn extract_format_fish() {
 
 #[test]
 fn extract_format_no_env_vars() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo hello".to_string(),
@@ -622,7 +622,7 @@ fn extract_format_no_env_vars() {
 
 #[test]
 fn extract_env_value_with_spaces_quoted_bash() {
-	use crate::extract::{format_extracted_commands, ExtractedCommand};
+	use crate::extract::{ExtractedCommand, format_extracted_commands};
 
 	let commands = vec![ExtractedCommand {
 		command: "echo hello".to_string(),

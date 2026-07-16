@@ -1,12 +1,12 @@
-use crate::args::{check_env_case_duplicates, validate_args, LoopVarGuard, RunArgs, SubstitutionError};
+use crate::args::{LoopVarGuard, RunArgs, SubstitutionError, check_env_case_duplicates, validate_args};
 use crate::control_flow::{
-	collect_shell_only_leaves, evaluate_if_condition, expand_glob, resolve_match_branch, ControlFlowError,
-	ShellLeafContext, ShellLeafFlattenError,
+	ControlFlowError, ShellLeafContext, ShellLeafFlattenError, collect_shell_only_leaves, evaluate_if_condition,
+	expand_glob, resolve_match_branch,
 };
-use crate::env::{build_env_with_base, EnvFileError, PrivateKeyProvider};
+use crate::env::{EnvFileError, PrivateKeyProvider, build_env_with_base};
 use crate::executor::join_shell_commands;
 use runfile_parser::{
-	walk_spec_aux_templates, walk_step_templates, CommandStep, ForStep, Runfile, WhenStep, WORKING_DIRECTORY_DEFAULT,
+	CommandStep, ForStep, Runfile, WORKING_DIRECTORY_DEFAULT, WhenStep, walk_spec_aux_templates, walk_step_templates,
 };
 use runfile_shell::ShellKind;
 use std::collections::{HashMap, HashSet};

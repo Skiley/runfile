@@ -1,13 +1,13 @@
-use crate::args::{check_env_case_duplicates, LoopVarGuard, RunArgs, SubstitutionError};
+use crate::args::{LoopVarGuard, RunArgs, SubstitutionError, check_env_case_duplicates};
 use crate::control_flow::{
-	collect_shell_only_leaves, count_leaves, evaluate_if_condition, expand_for_iterations, resolve_match_branch,
-	ControlFlowError, ShellLeafContext, ShellLeafFlattenError,
+	ControlFlowError, ShellLeafContext, ShellLeafFlattenError, collect_shell_only_leaves, count_leaves,
+	evaluate_if_condition, expand_for_iterations, resolve_match_branch,
 };
-use crate::env::{build_env_with_base, EnvFileError, PrivateKeyProvider};
+use crate::env::{EnvFileError, PrivateKeyProvider, build_env_with_base};
 use crate::force_kill::ForceKillGuard;
-use crate::logging::{is_logging_enabled, log_command, log_command_timing, StepCounter};
-use crate::parallel::{collect_leaves_parallel, run_parallel_leaves, ParallelLeaf};
-use crate::parallel_output::{flush_writer_thread, spawn_line_pump, OutputStream};
+use crate::logging::{StepCounter, is_logging_enabled, log_command, log_command_timing};
+use crate::parallel::{ParallelLeaf, collect_leaves_parallel, run_parallel_leaves};
+use crate::parallel_output::{OutputStream, flush_writer_thread, spawn_line_pump};
 use crate::stdio_tailer::StdioTailerSet;
 use runfile_parser::{
 	CommandSpec, CommandStep, ExtendStdio, ForStep, IfStep, MatchStep, TargetCallStep, WhenCondition, WhenStep,
@@ -176,10 +176,10 @@ impl ExecSetup {
 		// Build the chain we'll hand off to any @dep called from this target:
 		// parent's chain with this target's own addToPath appended.
 		let mut add_to_path_chain: Vec<Vec<String>> = parent_add_to_path_chain.to_vec();
-		if let Some(this_layer) = spec.add_to_path.as_deref() {
-			if !this_layer.is_empty() {
-				add_to_path_chain.push(this_layer.to_vec());
-			}
+		if let Some(this_layer) = spec.add_to_path.as_deref()
+			&& !this_layer.is_empty()
+		{
+			add_to_path_chain.push(this_layer.to_vec());
 		}
 
 		let setup = Self {

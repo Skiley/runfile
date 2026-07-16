@@ -119,18 +119,20 @@ fn parse_single_line_value(raw: &str) -> String {
 	}
 
 	// Double-quoted value
-	if raw.starts_with('"') && raw.len() >= 2 {
-		if let Some(end) = find_closing_quote(&raw[1..], '"') {
-			let inner = &raw[1..1 + end];
-			return unescape_double_quoted(inner);
-		}
+	if raw.starts_with('"')
+		&& raw.len() >= 2
+		&& let Some(end) = find_closing_quote(&raw[1..], '"')
+	{
+		let inner = &raw[1..1 + end];
+		return unescape_double_quoted(inner);
 	}
 
 	// Single-quoted value (no escape processing)
-	if raw.starts_with('\'') && raw.len() >= 2 {
-		if let Some(end) = find_closing_quote(&raw[1..], '\'') {
-			return raw[1..1 + end].to_string();
-		}
+	if raw.starts_with('\'')
+		&& raw.len() >= 2
+		&& let Some(end) = find_closing_quote(&raw[1..], '\'')
+	{
+		return raw[1..1 + end].to_string();
 	}
 
 	// Unquoted value: strip inline comments (# or //)

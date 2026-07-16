@@ -8,24 +8,24 @@
 	},
 	"targets": {
 		"build": {
-			"description": "Build all crates in debug mode using WSL",
-			"commands": "wsl --shell-type login -- cargo build {{ ARGS }} --target-dir target-linux"
+			"commands": "wsl --shell-type login -- cargo build --locked {{ ARGS }} --target-dir target-linux",
+			"description": "Build all crates in debug mode using WSL"
 		},
 		"build:release": {
-			"description": "Build all crates in release mode using WSL",
-			"commands": "wsl --shell-type login -- cargo build --release {{ ARGS }} --target-dir target-linux"
+			"commands": "wsl --shell-type login -- cargo build --locked --release {{ ARGS }} --target-dir target-linux",
+			"description": "Build all crates in release mode using WSL"
 		},
 		"lint": {
-			"description": "Completely lints (type-checks, formats, runs Clippy) the project using WSL",
 			"commands": [
-				"wsl --shell-type login -- cargo check",
+				"wsl --shell-type login -- cargo check --all-targets --all-features --locked",
 				"wsl --shell-type login -- cargo fmt --all",
-				"wsl --shell-type login -- cargo clippy --all-targets --all-features -- -D warnings"
-			]
+				"wsl --shell-type login -- cargo clippy --all-targets --all-features --locked -- -D warnings"
+			],
+			"description": "Completely lints (type-checks, formats, runs Clippy) the project using WSL"
 		},
 		"test": {
-			"description": "Run all workspace tests using WSL",
-			"commands": "wsl --shell-type login -- cargo test {{ ARGS }} --target-dir target-linux"
+			"commands": "wsl --shell-type login -- cargo test --workspace --all-features --locked {{ ARGS }} --target-dir target-linux",
+			"description": "Run all workspace tests using WSL"
 		}
 	}
 }

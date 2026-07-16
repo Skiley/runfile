@@ -2,8 +2,8 @@ use runfile_parser::{ExtendStdio, StdioStream};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -94,7 +94,7 @@ fn tail_file(path: PathBuf, stream: StdioStream, stop: Arc<AtomicBool>) {
 /// Read new complete lines from `path` starting at byte offset `pos`.
 /// Incomplete lines (no trailing newline) are kept in `line_buf` for the next call.
 /// Returns the new file position.
-fn read_new_lines(path: &PathBuf, pos: u64, line_buf: &mut String, stream: &StdioStream) -> u64 {
+pub(crate) fn read_new_lines(path: &PathBuf, pos: u64, line_buf: &mut String, stream: &StdioStream) -> u64 {
 	let file = match File::open(path) {
 		Ok(f) => f,
 		Err(_) => return pos, // File doesn't exist yet or is inaccessible
@@ -164,35 +164,5 @@ fn write_to_stream(stream: &StdioStream, data: &str) {
 			let _ = err.write_all(data.as_bytes());
 			let _ = err.flush();
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use std::io::Write;
-
-	#[test]
-	fn read_new_lines_advances_past_invalid_utf8() {
-		// Audit L10: an invalid-UTF-8 line followed by a valid one. The byte-based
-		// tailer must consume the whole file (advancing the offset) instead of
-		// stalling at the bad byte forever, as the old `read_line`-into-`String`
-		// path did (it errored and left the position unadvanced).
-		let dir = tempfile::tempdir().unwrap();
-		let path = dir.path().join("log.txt");
-		let mut f = std::fs::File::create(&path).unwrap();
-		f.write_all(b"bad\xFFline\ngood line\n").unwrap();
-		f.flush().unwrap();
-
-		let path_buf: PathBuf = path.clone();
-		let mut line_buf = String::new();
-		let new_pos = read_new_lines(&path_buf, 0, &mut line_buf, &StdioStream::Stdout);
-
-		let file_len = std::fs::metadata(&path).unwrap().len();
-		assert_eq!(new_pos, file_len, "tailer must advance past the invalid-UTF-8 line");
-		assert!(
-			line_buf.is_empty(),
-			"both lines were complete; nothing should be buffered"
-		);
 	}
 }

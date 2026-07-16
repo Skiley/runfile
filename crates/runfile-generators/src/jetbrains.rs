@@ -1,5 +1,5 @@
 use crate::editorconfig::EditorConfigProps;
-use runfile_parser::{is_internal_target_name, Runfile};
+use runfile_parser::{Runfile, is_internal_target_name};
 
 /// A generated JetBrains run configuration.
 pub struct JetBrainsRunConfig {
