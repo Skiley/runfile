@@ -1271,7 +1271,7 @@ impl crate::executor::DependencyResolver for FailingTargetResolver {
 #[test]
 fn parallel_failing_target_call_yields_nonzero_final_status() {
 	// Regression: a `parallel: true` target whose body fans out into `@target`
-	// calls (e.g. skiley-web's `check`) must report a non-zero `final_status`
+	// calls must report a non-zero `final_status`
 	// when ANY dispatched dep fails — even when the failing dep is not the
 	// last one observed. The CLI derives the process exit code from
 	// `final_status.code()` alone, so a success-looking status here means
